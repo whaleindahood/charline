@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T17:53:00Z",
+  "repository_commit": "436f1c4",
+  "operation": "telegram_round_trip_and_private_output_verification",
+  "status": "passed",
+  "telegram": {
+    "user_observed_round_trip": true,
+    "configured": true,
+    "polling_running": true,
+    "gateway_process_count": 1,
+    "tool_progress_configured_off": true
+  },
+  "runtime_after_restart": {
+    "status": "ready",
+    "doctor_blockers": [],
+    "google_authenticated_read": true
+  },
+  "contains_message_content": false,
+  "contains_secrets": false
+}
