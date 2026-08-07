@@ -4,7 +4,7 @@
   "repository_commit": "c8df8d4",
   "operation": "confirmed_one_time_telegram_reminder",
   "confirmation": "C4",
-  "status": "backend_verified_user_observation_pending",
+  "status": "verified_cleanup_pending",
   "job": {
     "job_id": "f4b3a74e3c88",
     "schedule": "once at 2026-08-08 09:00",
@@ -22,7 +22,8 @@
     "last_status": "ok",
     "output_saved": true,
     "delivery_fell_back_from_missing_thread_to_main_chat": true,
-    "response_included_idempotency_key": true
+    "response_included_idempotency_key": true,
+    "user_observed_delivery": true
   },
   "cleanup": "pending_separate_confirmation_C4D",
   "contains_message_content": false,
