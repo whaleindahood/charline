@@ -19,7 +19,10 @@ from typing import Callable, Sequence
 
 
 CommandRunner = Callable[[Sequence[str]], tuple[int, str]]
-SUPPORTED_HERMES_VERSION = "Hermes Agent v0.19.0"
+SUPPORTED_HERMES_VERSIONS = (
+    "Hermes Agent v0.19.0",
+    "Hermes Agent v0.20.0",
+)
 
 
 def default_hermes_home() -> Path:
@@ -151,8 +154,8 @@ def collect_runtime(
         "hermes_version": {
             **_public(raw_version),
             "ok": raw_version["returncode"] == 0
-            and SUPPORTED_HERMES_VERSION in version_text,
-            "expected": SUPPORTED_HERMES_VERSION,
+            and any(version in version_text for version in SUPPORTED_HERMES_VERSIONS),
+            "expected": list(SUPPORTED_HERMES_VERSIONS),
         },
         "config": {
             "returncode": raw_config["returncode"],
