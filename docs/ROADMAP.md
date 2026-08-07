@@ -10,10 +10,10 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 
 | Phase | Repository | Live proof |
 |---|---|---|
-| 0. Foundation | Complete | Profile synced; final runtime gate pending OAuth/security checks |
-| 1. Calendar | Complete | Pending authenticated read and confirmed sandbox write |
-| 2. Workspace | Complete within installed Google CLI surface | Pending authenticated reads/writes |
-| 3. Research | Complete | Provider availability checked at runtime |
+| 0. Foundation | Complete | Profile synced; OAuth and one Gateway verified; SQLite fix and Telegram round trip pending |
+| 1. Calendar | Complete | Authenticated read passed; confirmed sandbox write pending |
+| 2. Workspace | Complete within installed Google CLI surface | Gmail, Drive and Contacts reads passed; Docs/Sheets had no candidate resources; confirmed writes pending |
+| 3. Research | Complete | Browser provider available; optional structured web provider is not configured |
 | 4. Briefing/reminders | Complete | Pending confirmed cron smoke test |
 | 5. Developer/usage | Complete | Deployment remains separately confirmed |
 

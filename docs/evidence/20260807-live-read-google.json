@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T16:45:55Z",
+  "repository_commit": "476545a2327cc44f7eea676669ac6aec263222a9",
+  "operation": "active_profile_and_authenticated_read_verification",
+  "status": "partial",
+  "active_profile": {
+    "health_status": "consistent",
+    "managed_skill_count": 12,
+    "mismatched": [],
+    "active_extras": []
+  },
+  "runtime": {
+    "hermes_version_supported": true,
+    "telegram_configured": true,
+    "single_gateway_running": true,
+    "gateway_process_count": 1,
+    "google_authenticated_read": true,
+    "doctor_clean": false,
+    "doctor_blockers": [
+      "sqlite-wal-reset"
+    ],
+    "telegram_round_trip": "pending_user_observation"
+  },
+  "google_workspace_reads": {
+    "gmail": "passed",
+    "calendar": "passed",
+    "drive": "passed",
+    "contacts": "passed",
+    "docs": "no_candidate_resource",
+    "sheets": "no_candidate_resource"
+  },
+  "repository": {
+    "pytest": {
+      "status": "passed",
+      "tests_passed": 70,
+      "tests_skipped": 2,
+      "subtests_passed": 17
+    },
+    "product_evals": {
+      "status": "passed",
+      "scenarios_passed": 19,
+      "scenarios_failed": 0
+    }
+  },
+  "external_workspace_writes": 0,
+  "release_state": "profile-ready",
+  "contains_secrets": false
+}
