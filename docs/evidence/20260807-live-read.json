@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T15:38:18Z",
+  "operation": "runtime_check_with_live_google_read",
+  "status": "failed",
+  "checks": {
+    "hermes_version_supported": true,
+    "hermes_config_valid": true,
+    "doctor_completed": false,
+    "doctor_failure": "windows_uv_trampoline_access_denied",
+    "gateway_running": false,
+    "google_authenticated_read": false,
+    "google_failure": "oauth_token_expired_or_revoked"
+  },
+  "required_follow_up": [
+    "google_oauth_reauthentication",
+    "single_gateway_start",
+    "repeat_runtime_check",
+    "telegram_round_trip"
+  ],
+  "contains_secrets": false
+}

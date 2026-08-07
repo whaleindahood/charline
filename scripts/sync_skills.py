@@ -66,6 +66,77 @@ def _tree_hashes(root: Path) -> dict[str, str]:
     return hashes
 
 
+def _managed_sources(source_root: Path) -> list[Path]:
+    sources = [
+        path
+        for path in sorted(source_root.iterdir(), key=lambda path: path.name)
+        if path.is_dir()
+        and path.name.startswith("charline-")
+        and (path / "SKILL.md").is_file()
+    ]
+    if not sources:
+        raise RuntimeError("no managed Charline skills found")
+    return sources
+
+
+def plan_sync(*, source_root: Path, hermes_home: Path, backup_root: Path) -> dict:
+    """Describe the exact managed profile effect without changing any path."""
+
+    source_root = Path(source_root)
+    hermes_home = Path(hermes_home)
+    backup_root = Path(backup_root)
+    if not source_root.is_dir():
+        raise FileNotFoundError(f"skill source not found: {source_root}")
+    destination_root = hermes_home / "skills" / "productivity"
+    for left, right in (
+        (source_root, backup_root),
+        (source_root, destination_root),
+        (backup_root, destination_root),
+    ):
+        if _paths_overlap(left, right):
+            raise ValueError(f"managed paths overlap: {left} and {right}")
+
+    sources = _managed_sources(source_root)
+    for source in sources:
+        _reject_links(source)
+    if destination_root.exists() and _is_link_or_reparse(destination_root):
+        raise ValueError(f"link or reparse point is not allowed: {destination_root}")
+
+    skills = []
+    for source in sources:
+        target = destination_root / source.name
+        if target.exists() and _is_link_or_reparse(target):
+            raise ValueError(f"link or reparse point is not allowed: {target}")
+        exists = target.is_dir()
+        source_files = _tree_hashes(source)
+        content_changed = not exists or source_files != _tree_hashes(target)
+        skills.append(
+            {
+                "name": source.name,
+                "effect": "replace" if exists else "create",
+                "content_changed": content_changed,
+                "source_file_count": len(source_files),
+            }
+        )
+
+    source_names = {source.name for source in sources}
+    active_names = {
+        path.name
+        for path in destination_root.glob("charline-*")
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    }
+    return {
+        "schema_version": 1,
+        "operation": "replace_managed_skills",
+        "source_root": str(source_root.resolve(strict=False)),
+        "target_root": str(destination_root.resolve(strict=False)),
+        "backup_root": str(backup_root.resolve(strict=False)),
+        "skills": skills,
+        "active_extras": sorted(active_names - source_names),
+        "removes_active_extras": False,
+    }
+
+
 def sync_skills(
     *,
     source_root: Path,
@@ -89,14 +160,7 @@ def sync_skills(
         if _paths_overlap(left, right):
             raise ValueError(f"managed paths overlap: {left} and {right}")
 
-    sources = [
-        path for path in sorted(source_root.iterdir(), key=lambda path: path.name)
-        if path.is_dir()
-        and path.name.startswith("charline-")
-        and (path / "SKILL.md").is_file()
-    ]
-    if not sources:
-        raise RuntimeError("no managed Charline skills found")
+    sources = _managed_sources(source_root)
     for source in sources:
         _reject_links(source)
 
@@ -203,7 +267,21 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-home", type=Path, default=default_hermes_home())
     parser.add_argument("--backup-dir", type=Path, default=project_root / "backups" / timestamp)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print exact target/backup/skill effects without changing the profile",
+    )
     args = parser.parse_args()
+
+    if args.dry_run:
+        planned = plan_sync(
+            source_root=project_root / "skills" / "productivity",
+            hermes_home=args.hermes_home,
+            backup_root=args.backup_dir,
+        )
+        print(json.dumps({"status": "planned", **planned}, ensure_ascii=True, indent=2))
+        return 0
 
     installed = sync_skills(
         source_root=project_root / "skills" / "productivity",

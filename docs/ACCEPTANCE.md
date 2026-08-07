@@ -40,6 +40,8 @@ These are read-only at the service level, but Google OAuth may refresh a local t
 
 Required: supported Hermes version, valid Telegram config, clean doctor, exactly one running Gateway PID and successful authenticated Google read. Separately receive and answer one Telegram message in the primary chat.
 
+An expired/revoked Google token is a failed gate. Re-authenticate through the installed Google Workspace setup helper and repeat the live read; credential-file presence alone is not evidence of working access.
+
 ## Confirmed sandbox effects
 
 Each item gets its own concrete preview and confirmation; use non-production targets:
@@ -56,4 +58,3 @@ Do not use Drive share/delete as a V1 proof until the installed interface expose
 - `repository-complete`: automated gates pass and docs match the installed interface.
 - `profile-ready`: repository-complete plus active-profile gate.
 - `production-verified`: profile-ready plus live read gates and confirmed sandbox effects.
-

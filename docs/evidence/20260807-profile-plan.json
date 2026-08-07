@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T15:38:18Z",
+  "operation": "replace_managed_skills",
+  "status": "awaiting_confirmation",
+  "source_root": "C:\\Users\\Legion\\Desktop\\charline\\skills\\productivity",
+  "target_root": "C:\\Users\\Legion\\AppData\\Local\\hermes\\skills\\productivity",
+  "backup_root": "C:\\Users\\Legion\\Desktop\\charline\\backups\\20260807T153800Z",
+  "effects": {
+    "create": [
+      "charline-command-center",
+      "charline-development",
+      "charline-docs",
+      "charline-drive",
+      "charline-gmail",
+      "charline-reminders",
+      "charline-sheets"
+    ],
+    "replace_with_content_change": [
+      "charline-calendar",
+      "charline-research"
+    ],
+    "replace_without_content_change": [
+      "charline-briefing",
+      "charline-orchestration",
+      "charline-workspace"
+    ],
+    "remove": []
+  },
+  "active_extras": [],
+  "contains_secrets": false
+}

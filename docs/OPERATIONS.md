@@ -4,7 +4,7 @@
 
 1. Back up the active Hermes profile through the supported Hermes backup command.
 2. Run the repository tests.
-3. Review the exact managed skill list and backup path, obtain confirmation, then run `python scripts/sync_skills.py` with an explicit Hermes home and a new backup directory.
+3. Run `python scripts/sync_skills.py --dry-run` with explicit Hermes home and backup directory; review its exact create/replace list, obtain confirmation, then rerun without `--dry-run`.
 4. Do not run two sync processes against the same profile.
 
 Skill sync is exception-safe: a caught activation failure restores the prior managed skill set. It is not crash-atomic; process or machine termination during activation can require rollback from the backup.
@@ -16,6 +16,8 @@ Skill sync is exception-safe: a caught activation failure restores the prior man
 3. Verify one read-only Google API request.
 4. Verify the active Telegram route by receiving and answering a message.
 5. Treat these as separate checks: repository consistency does not prove live runtime health.
+
+If Google reports `invalid_grant` or a revoked token, use the installed Google Workspace setup helper to print a new authorization URL. The user completes consent, then supplies the one-time code directly to the helper. Never place that code in Git, logs, evidence files or chat transcripts. Repeat `--check-live` afterwards.
 
 ## Rollback
 

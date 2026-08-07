@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.sync_skills import sync_skills
+from scripts.sync_skills import plan_sync, sync_skills
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +16,43 @@ class SyncSkillsTests(unittest.TestCase):
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(content, encoding="utf-8")
         return skill
+
+    def test_plan_reports_exact_effect_without_mutating_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source_root = base / "source"
+            destination_root = base / "hermes" / "skills" / "productivity"
+            self.make_skill(source_root, "charline-a", "name: charline-a\nnew")
+            self.make_skill(source_root, "charline-b", "name: charline-b\nsame")
+            self.make_skill(destination_root, "charline-a", "name: charline-a\nold")
+            self.make_skill(destination_root, "charline-b", "name: charline-b\nsame")
+            self.make_skill(destination_root, "charline-stale", "name: stale")
+            before = (destination_root / "charline-a" / "SKILL.md").read_text(encoding="utf-8")
+
+            result = plan_sync(
+                source_root=source_root,
+                hermes_home=base / "hermes",
+                backup_root=base / "backup",
+            )
+
+            self.assertEqual(result["operation"], "replace_managed_skills")
+            self.assertEqual(
+                [
+                    (item["name"], item["effect"], item["content_changed"])
+                    for item in result["skills"]
+                ],
+                [
+                    ("charline-a", "replace", True),
+                    ("charline-b", "replace", False),
+                ],
+            )
+            self.assertEqual(result["active_extras"], ["charline-stale"])
+            self.assertFalse(result["removes_active_extras"])
+            self.assertFalse((base / "backup").exists())
+            self.assertEqual(
+                (destination_root / "charline-a" / "SKILL.md").read_text(encoding="utf-8"),
+                before,
+            )
 
     def test_installs_all_managed_skills_and_backs_up_existing_skill(self):
         with tempfile.TemporaryDirectory() as tmp:
