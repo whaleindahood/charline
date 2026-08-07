@@ -133,6 +133,46 @@ class RuntimeCheckTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertTrue(all(call.kwargs["timeout"] == 90 for call in run.call_args_list))
 
+    def test_live_google_uses_base_python_when_venv_launcher_is_unreliable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp)
+            setup = (
+                hermes_home
+                / "skills"
+                / "productivity"
+                / "google-workspace"
+                / "scripts"
+                / "setup.py"
+            )
+            setup.parent.mkdir(parents=True)
+            setup.write_text("", encoding="utf-8")
+            venv = hermes_home / "hermes-agent" / "venv"
+            base = hermes_home / "stable-python"
+            (venv / "Lib" / "site-packages").mkdir(parents=True)
+            base.mkdir()
+            (base / "python.exe").write_text("", encoding="utf-8")
+            (venv / "pyvenv.cfg").write_text(
+                f"home = {base}\nversion_info = 3.11.9\n",
+                encoding="utf-8",
+            )
+            commands = []
+
+            def runner(command):
+                commands.append(list(map(str, command)))
+                joined = " ".join(map(str, command))
+                if "--version" in joined:
+                    return 0, "Hermes Agent v0.19.0"
+                if "config check" in joined:
+                    return 0, "✓ TELEGRAM_BOT_TOKEN\n✓ TELEGRAM_ALLOWED_USERS"
+                if "gateway status" in joined:
+                    return 0, "Gateway process running (PID: 123)"
+                return 0, "ok"
+
+            collect_runtime(hermes_home, runner, check_live_google=True)
+            google_command = next(command for command in commands if "--check-live" in " ".join(command))
+            self.assertEqual(google_command[0], str(base / "python.exe"))
+            self.assertIn("site-packages", " ".join(google_command))
+
 
 if __name__ == "__main__":
     unittest.main()

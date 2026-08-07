@@ -71,15 +71,38 @@ def _configured(output: str, name: str) -> bool:
     return re.search(rf"[✓✔]\s+{re.escape(name)}\b", output) is not None
 
 
-def _python_for_google(hermes_home: Path) -> str:
+def _google_live_command(hermes_home: Path, setup_path: Path) -> list[str]:
+    venv = hermes_home / "hermes-agent" / "venv"
+    config = venv / "pyvenv.cfg"
+    site_packages = venv / "Lib" / "site-packages"
+    if config.is_file() and site_packages.is_dir():
+        try:
+            home_line = next(
+                line
+                for line in config.read_text(encoding="utf-8").splitlines()
+                if line.casefold().startswith("home =")
+            )
+            base_home = Path(home_line.split("=", 1)[1].strip())
+            base_candidates = (base_home / "python.exe", base_home / "bin" / "python")
+            base_python = next(path for path in base_candidates if path.is_file())
+            code = (
+                "import runpy,sys;"
+                f"sys.path.insert(0,{str(site_packages)!r});"
+                f"sys.argv=[{str(setup_path)!r},'--check-live'];"
+                f"runpy.run_path({str(setup_path)!r},run_name='__main__')"
+            )
+            return [str(base_python), "-c", code]
+        except (OSError, StopIteration, ValueError):
+            pass
+
     candidates = (
-        hermes_home / "hermes-agent" / "venv" / "Scripts" / "python.exe",
-        hermes_home / "hermes-agent" / "venv" / "bin" / "python",
+        venv / "Scripts" / "python.exe",
+        venv / "bin" / "python",
     )
     for candidate in candidates:
         if candidate.is_file():
-            return str(candidate)
-    return sys.executable
+            return [str(candidate), str(setup_path), "--check-live"]
+    return [sys.executable, str(setup_path), "--check-live"]
 
 
 def collect_runtime(
@@ -166,7 +189,7 @@ def collect_runtime(
         if google_setup.is_file():
             raw_google = _run(
                 runner,
-                [_python_for_google(hermes_home), str(google_setup), "--check-live"],
+                _google_live_command(hermes_home, google_setup),
             )
             checks["google_live"] = {
                 **_public(raw_google),
