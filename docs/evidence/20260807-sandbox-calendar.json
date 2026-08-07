@@ -19,6 +19,9 @@
   },
   "pre_write_conflicts": 0,
   "read_back_verified": true,
-  "deletion": "pending_separate_confirmation",
+  "deletion": {
+    "confirmation": "C1D",
+    "status": "verified_absent"
+  },
   "contains_secrets": false
 }

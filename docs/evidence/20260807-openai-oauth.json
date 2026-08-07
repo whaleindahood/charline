@@ -6,15 +6,16 @@
   "status": "passed",
   "auth": {
     "provider": "openai-codex",
-    "credential_count": 2,
+    "credential_count": 1,
     "active_label": "current-account-20260807",
     "active_credential_logged_in": true,
-    "legacy_credential": "rate_limited_pending_removal_confirmation"
+    "legacy_credential": "removed_after_confirmation"
   },
   "inference": {
     "model": "gpt-5.6-sol",
     "exit_code": 0,
-    "exact_smoke_response": true
+    "exact_smoke_response": true,
+    "post_removal_smoke_response": true
   },
   "gateway": {
     "running": true,
