@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T17:36:00Z",
+  "repository_commit": "4b43ca4",
+  "operation": "openai_codex_oauth_reauthentication_and_inference_smoke",
+  "status": "passed",
+  "auth": {
+    "provider": "openai-codex",
+    "credential_count": 2,
+    "active_label": "current-account-20260807",
+    "active_credential_logged_in": true,
+    "legacy_credential": "rate_limited_pending_removal_confirmation"
+  },
+  "inference": {
+    "model": "gpt-5.6-sol",
+    "exit_code": 0,
+    "exact_smoke_response": true
+  },
+  "gateway": {
+    "running": true,
+    "process_count": 1
+  },
+  "contains_secrets": false
+}
