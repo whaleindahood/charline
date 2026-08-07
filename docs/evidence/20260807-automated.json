@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T15:34:25Z",
+  "repository_commit": "0d64586221859cbb0d632e47f82164cb25524724",
+  "repository": {
+    "pytest": {
+      "status": "passed",
+      "tests_passed": 65,
+      "tests_skipped": 2,
+      "subtests_passed": 17
+    },
+    "product_evals": {
+      "status": "passed",
+      "scenarios_passed": 19,
+      "scenarios_failed": 0
+    },
+    "compileall": "passed"
+  },
+  "active_profile": {
+    "status": "degraded",
+    "managed_skill_count": 12,
+    "mismatched_skills": [
+      "charline-calendar",
+      "charline-command-center",
+      "charline-development",
+      "charline-docs",
+      "charline-drive",
+      "charline-gmail",
+      "charline-reminders",
+      "charline-research",
+      "charline-sheets"
+    ],
+    "google_oauth_files_present": true,
+    "hermes_config_valid": true
+  },
+  "runtime": {
+    "hermes_version": "0.19.0",
+    "doctor_blockers": ["sqlite-wal-reset"],
+    "gateway_running": false,
+    "google_live_check": "not_requested",
+    "telegram_round_trip": "not_verified"
+  },
+  "usage_7d": {
+    "api_calls": 189,
+    "subagent_api_calls": 61,
+    "input_tokens": 1288171,
+    "cache_read_tokens": 9867776,
+    "active_subagents": 0,
+    "status": "attention"
+  },
+  "release_state": "repository-complete"
+}
