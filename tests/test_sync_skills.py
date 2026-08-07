@@ -33,6 +33,26 @@ class SyncSkillsTests(unittest.TestCase):
                 self.assertTrue(target.exists())
                 self.assertIn(f"name: {name}", target.read_text(encoding="utf-8"))
 
+    def test_does_not_install_runtime_temp_or_python_cache_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source_root = base / "source"
+            skill = self.make_skill(source_root, "charline-a", "name: charline-a\n")
+            (skill / ".hermes-tmp.partial").write_text("temp", encoding="utf-8")
+            cache = skill / "__pycache__"
+            cache.mkdir()
+            (cache / "module.pyc").write_bytes(b"cache")
+
+            sync_skills(
+                source_root=source_root,
+                hermes_home=base / "hermes",
+                backup_root=base / "backup",
+            )
+
+            target = base / "hermes" / "skills" / "productivity" / "charline-a"
+            self.assertFalse((target / ".hermes-tmp.partial").exists())
+            self.assertFalse((target / "__pycache__").exists())
+
     def test_rolls_back_all_skills_when_activation_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

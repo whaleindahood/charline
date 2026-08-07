@@ -11,6 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+COPY_IGNORE = shutil.ignore_patterns(".hermes-tmp.*", "__pycache__", "*.pyc")
+
+
 def _paths_overlap(left: Path, right: Path) -> bool:
     left = left.resolve(strict=False)
     right = right.resolve(strict=False)
@@ -105,7 +108,7 @@ def sync_skills(
         rollback_root.mkdir()
 
         for source in sources:
-            shutil.copytree(source, staging_root / source.name)
+            shutil.copytree(source, staging_root / source.name, ignore=COPY_IGNORE)
 
         for source in sources:
             target = destination_root / source.name
