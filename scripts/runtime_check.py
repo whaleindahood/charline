@@ -66,6 +66,10 @@ def _public(result: dict[str, object]) -> dict[str, object]:
     return {"returncode": result["returncode"], "detail": result["detail"]}
 
 
+def _configured(output: str, name: str) -> bool:
+    return re.search(rf"[✓✔]\s+{re.escape(name)}\b", output) is not None
+
+
 def _python_for_google(hermes_home: Path) -> str:
     candidates = (
         hermes_home / "hermes-agent" / "venv" / "Scripts" / "python.exe",
@@ -99,6 +103,11 @@ def collect_runtime(
     doctor_blockers = []
     if "wal-reset" in doctor_lower or "wal reset" in doctor_lower:
         doctor_blockers.append("sqlite-wal-reset")
+    config_ok = (
+        raw_config["returncode"] == 0
+        and _configured(config_text, "TELEGRAM_BOT_TOKEN")
+        and _configured(config_text, "TELEGRAM_ALLOWED_USERS")
+    )
     pid_match = re.search(r"PID\(s\):\s*([0-9,\s]+)", gateway_text, re.IGNORECASE)
     pids = []
     if pid_match:
@@ -118,10 +127,13 @@ def collect_runtime(
             "expected": SUPPORTED_HERMES_VERSION,
         },
         "config": {
-            **_public(raw_config),
-            "ok": raw_config["returncode"] == 0
-            and "TELEGRAM_BOT_TOKEN" in config_text
-            and "TELEGRAM_ALLOWED_USERS" in config_text,
+            "returncode": raw_config["returncode"],
+            "detail": (
+                "valid; Telegram bot token and allowlist configured"
+                if config_ok
+                else str(raw_config["detail"])
+            ),
+            "ok": config_ok,
         },
         "doctor": {
             **_public(raw_doctor),

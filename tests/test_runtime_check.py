@@ -27,7 +27,7 @@ class RuntimeCheckTests(unittest.TestCase):
                 if "--version" in joined:
                     return 0, "Hermes Agent v0.19.0 (test)"
                 if "config check" in joined:
-                    return 0, "TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS"
+                    return 0, "✓ TELEGRAM_BOT_TOKEN\n✓ TELEGRAM_ALLOWED_USERS"
                 if "gateway status" in joined:
                     return 0, "Running\nPID(s): 123"
                 if "--check-live" in joined:
@@ -55,7 +55,7 @@ class RuntimeCheckTests(unittest.TestCase):
                     return 1, "SQLite vulnerable"
                 if "gateway status" in joined:
                     return 1, "Gateway stopped"
-                return 0, "TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS"
+                return 0, "✓ TELEGRAM_BOT_TOKEN\n✓ TELEGRAM_ALLOWED_USERS"
 
             result = collect_runtime(
                 hermes_home=hermes_home,
@@ -93,7 +93,7 @@ class RuntimeCheckTests(unittest.TestCase):
                 if "--version" in joined:
                     return 0, "Hermes Agent v0.19.0"
                 if "config check" in joined:
-                    return 0, "TELEGRAM_BOT_TOKEN TELEGRAM_ALLOWED_USERS"
+                    return 0, "✓ TELEGRAM_BOT_TOKEN\n✓ TELEGRAM_ALLOWED_USERS"
                 if "gateway status" in joined:
                     return 0, "Running\nPID(s): 123"
                 if "doctor" in joined:
@@ -106,6 +106,21 @@ class RuntimeCheckTests(unittest.TestCase):
                 result["checks"]["doctor"]["blocking_findings"],
                 ["sqlite-wal-reset"],
             )
+
+    def test_unset_telegram_fields_do_not_pass_config_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def runner(command):
+                joined = " ".join(map(str, command))
+                if "--version" in joined:
+                    return 0, "Hermes Agent v0.19.0"
+                if "config check" in joined:
+                    return 0, "○ TELEGRAM_BOT_TOKEN\n○ TELEGRAM_ALLOWED_USERS"
+                if "gateway status" in joined:
+                    return 0, "Running\nPID(s): 123"
+                return 0, "doctor ok"
+
+            result = collect_runtime(Path(tmp), runner, check_live_google=False)
+            self.assertFalse(result["checks"]["config"]["ok"])
 
     @patch("scripts.runtime_check.subprocess.run")
     def test_default_runner_retries_windows_access_violation_once(self, run):
