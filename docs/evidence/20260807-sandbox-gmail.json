@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T18:07:19Z",
+  "repository_commit": "c8df8d4",
+  "operation": "confirmed_gmail_self_send",
+  "confirmation": "C2",
+  "status": "verified",
+  "precondition": {
+    "exact_subject_search_count": 0
+  },
+  "message_id": "19fdd687a0c657b6",
+  "read_back": {
+    "message_id_matches": true,
+    "sender_is_controlled_account": true,
+    "recipient_is_controlled_account": true,
+    "subject_matches": true,
+    "body_marker_matches": true,
+    "sent_label_present": true
+  },
+  "contains_email_body": false,
+  "contains_secrets": false
+}

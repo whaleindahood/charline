@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T18:11:36Z",
+  "repository_commit": "c8df8d4",
+  "operation": "confirmed_one_time_telegram_reminder",
+  "confirmation": "C4",
+  "status": "backend_verified_user_observation_pending",
+  "job": {
+    "job_id": "f4b3a74e3c88",
+    "schedule": "once at 2026-08-08 09:00",
+    "repeat_completed": "1/1",
+    "state": "completed",
+    "enabled": false,
+    "delivery": "telegram",
+    "model": "gpt-5.6-sol",
+    "provider": "openai-codex",
+    "prompt_sha256": "57868798cceb3bdfe370d59d30c661ced283fd7f613acc3940c02cd515f44497"
+  },
+  "run": {
+    "run_id": "962bc4e247bf4a5880b18278098e5e02",
+    "execution_status": "completed",
+    "last_status": "ok",
+    "output_saved": true,
+    "delivery_fell_back_from_missing_thread_to_main_chat": true,
+    "response_included_idempotency_key": true
+  },
+  "cleanup": "pending_separate_confirmation_C4D",
+  "contains_message_content": false,
+  "contains_telegram_identifiers": false,
+  "contains_secrets": false
+}

@@ -12,9 +12,9 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 |---|---|---|
 | 0. Foundation | Complete | Profile synced; Hermes 0.20, fixed SQLite, OAuth, one Gateway, Telegram polling and round trip verified |
 | 1. Calendar | Complete | Authenticated read and confirmed create/read-back/delete/absence sandbox proof passed |
-| 2. Workspace | Complete within installed Google CLI surface | Gmail, Drive and Contacts reads passed; Docs append and Sheets update read-back passed; Gmail sandbox send pending |
+| 2. Workspace | Complete within installed Google CLI surface | Gmail, Drive and Contacts reads passed; confirmed Gmail self-send, Docs append and Sheets update read-back passed |
 | 3. Research | Complete | Browser provider available; optional structured web provider is not configured |
-| 4. Briefing/reminders | Complete | Pending confirmed cron smoke test |
+| 4. Briefing/reminders | Complete | Confirmed cron create/read-back/run passed; user observation and separately confirmed cleanup pending |
 | 5. Developer/usage | Complete | Deployment remains separately confirmed |
 
 ## Phase 0 — Foundation

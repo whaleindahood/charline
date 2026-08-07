@@ -150,6 +150,33 @@ class RuntimeCheckTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertTrue(all(call.kwargs["timeout"] == 90 for call in run.call_args_list))
 
+    @patch("scripts.runtime_check.subprocess.run")
+    def test_default_runner_retries_windows_permission_error_and_second_crash(self, run):
+        run.side_effect = [
+            PermissionError(13, "permission denied"),
+            CompletedProcess(["hermes"], 3221225477, "", ""),
+            CompletedProcess(["hermes"], 0, "ready", ""),
+        ]
+
+        self.assertEqual(default_runner(["hermes", "--version"]), (0, "ready"))
+        self.assertEqual(run.call_count, 3)
+
+    @patch("scripts.runtime_check.subprocess.run")
+    def test_default_runner_retries_uv_trampoline_permission_text(self, run):
+        run.side_effect = [
+            CompletedProcess(
+                ["hermes"],
+                1,
+                "",
+                "error: uv trampoline failed to spawn Python child process\n"
+                "Caused by: permission denied (os error 5)",
+            ),
+            CompletedProcess(["hermes"], 0, "ready", ""),
+        ]
+
+        self.assertEqual(default_runner(["hermes", "doctor"]), (0, "ready"))
+        self.assertEqual(run.call_count, 2)
+
     def test_live_google_uses_base_python_when_venv_launcher_is_unreliable(self):
         with tempfile.TemporaryDirectory() as tmp:
             hermes_home = Path(tmp)

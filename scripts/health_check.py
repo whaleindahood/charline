@@ -10,21 +10,41 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 Runner = Callable[[Sequence[str]], tuple[int, str]]
+WINDOWS_LAUNCH_FAILURE_CODES = {3221225477, -1073741819}
+DIAGNOSTIC_LAUNCH_ATTEMPTS = 3
+
+
+def _is_transient_windows_launch_failure(completed: subprocess.CompletedProcess[str]) -> bool:
+    if completed.returncode in WINDOWS_LAUNCH_FAILURE_CODES:
+        return True
+    detail = f"{completed.stdout or ''}\n{completed.stderr or ''}".casefold()
+    return "uv trampoline failed to spawn python child process" in detail and any(
+        marker in detail
+        for marker in ("permission denied", "access is denied", "отказано в доступе")
+    )
 
 
 def default_runner(command: Sequence[str]) -> tuple[int, str]:
     completed = None
-    for attempt in range(2):
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-            check=False,
-        )
-        if completed.returncode not in {3221225477, -1073741819} or attempt == 1:
+    for attempt in range(DIAGNOSTIC_LAUNCH_ATTEMPTS):
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                check=False,
+            )
+        except PermissionError:
+            if attempt == DIAGNOSTIC_LAUNCH_ATTEMPTS - 1:
+                raise
+            continue
+        if (
+            not _is_transient_windows_launch_failure(completed)
+            or attempt == DIAGNOSTIC_LAUNCH_ATTEMPTS - 1
+        ):
             break
     assert completed is not None
     output = (completed.stdout or completed.stderr).strip()

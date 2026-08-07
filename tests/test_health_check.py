@@ -96,6 +96,33 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual(default_runner(["hermes", "config", "check"]), (0, "ok"))
         self.assertEqual(run.call_count, 2)
 
+    @patch("scripts.health_check.subprocess.run")
+    def test_default_runner_retries_windows_permission_error_and_second_crash(self, run):
+        run.side_effect = [
+            PermissionError(13, "permission denied"),
+            CompletedProcess(["hermes"], 3221225477, "", ""),
+            CompletedProcess(["hermes"], 0, "valid", ""),
+        ]
+
+        self.assertEqual(default_runner(["hermes", "config", "check"]), (0, "valid"))
+        self.assertEqual(run.call_count, 3)
+
+    @patch("scripts.health_check.subprocess.run")
+    def test_default_runner_retries_uv_trampoline_permission_text(self, run):
+        run.side_effect = [
+            CompletedProcess(
+                ["hermes"],
+                1,
+                "",
+                "error: uv trampoline failed to spawn Python child process\n"
+                "Caused by: permission denied (os error 5)",
+            ),
+            CompletedProcess(["hermes"], 0, "valid", ""),
+        ]
+
+        self.assertEqual(default_runner(["hermes", "config", "check"]), (0, "valid"))
+        self.assertEqual(run.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
