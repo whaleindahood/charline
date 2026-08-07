@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T17:47:30Z",
+  "repository_commit": "283c2ce",
+  "operation": "confirmed_docs_and_sheets_sandbox_effects",
+  "confirmation": "C3",
+  "status": "verified",
+  "docs": {
+    "title": "Charline V1 sandbox Doc 2026-08-07",
+    "document_id": "1b1aP3vCzL-yron6akvV5rL5CPsu0MpVhLddF9kt3sTM",
+    "marker": "CHARLINE_V1_DOC_OK_20260807",
+    "read_back_verified": true
+  },
+  "sheets": {
+    "title": "Charline V1 sandbox Sheet 2026-08-07",
+    "spreadsheet_id": "1CEM3ihheyj7cDBaHvK1wTTAOUPEKckKKDB8AYjq3KP0",
+    "range": "Sheet1!A1",
+    "marker": "CHARLINE_V1_SHEET_OK_20260807",
+    "read_back_verified": true
+  },
+  "cleanup": "resources_retained_because_installed_drive_delete_read_back_is_insufficient",
+  "contains_secrets": false
+}
