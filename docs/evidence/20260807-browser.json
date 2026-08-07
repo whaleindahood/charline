@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T17:12:30Z",
+  "repository_commit": "8ff1231",
+  "operation": "hermes_managed_browser_setup_and_smoke_test",
+  "status": "passed",
+  "browser": {
+    "agent_browser_version": "0.26.0",
+    "chromium_installed": true,
+    "acp_check": "passed",
+    "local_about_blank_open": "passed",
+    "local_about_blank_read": "passed",
+    "browser_closed": true
+  },
+  "external_web_requests": 0,
+  "contains_secrets": false
+}
