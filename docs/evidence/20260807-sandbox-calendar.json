@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T17:27:00Z",
+  "repository_commit": "f0478d1a67a107d19703b509664b5f13808078a7",
+  "operation": "confirmed_calendar_sandbox_create",
+  "confirmation": "C1",
+  "status": "verified",
+  "calendar": {
+    "calendar_id": "primary",
+    "event_id": "10t457t3cjc3avmku5n295e878",
+    "summary": "Charline V1 sandbox verification",
+    "start": "2026-08-08T09:00:00+03:00",
+    "end": "2026-08-08T09:05:00+03:00",
+    "timezone": "Europe/Moscow",
+    "attendees": [],
+    "location": "",
+    "description": "",
+    "recurrence": "none"
+  },
+  "pre_write_conflicts": 0,
+  "read_back_verified": true,
+  "deletion": "pending_separate_confirmation",
+  "contains_secrets": false
+}
