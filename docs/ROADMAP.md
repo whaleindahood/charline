@@ -10,7 +10,7 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 
 | Phase | Repository | Live proof |
 |---|---|---|
-| 0. Foundation | Complete | Profile synced; OAuth and one Gateway verified; SQLite fix and Telegram round trip pending |
+| 0. Foundation | Complete | Profile synced; Hermes 0.20, fixed SQLite, OAuth, one Gateway and Telegram polling verified; Telegram round trip pending |
 | 1. Calendar | Complete | Authenticated read passed; confirmed sandbox write pending |
 | 2. Workspace | Complete within installed Google CLI surface | Gmail, Drive and Contacts reads passed; Docs/Sheets had no candidate resources; confirmed writes pending |
 | 3. Research | Complete | Browser provider available; optional structured web provider is not configured |

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T17:11:24Z",
+  "repository_commit": "3b51c238d165b03d48258e6323a74f7071eae430",
+  "operation": "supported_hermes_runtime_update_and_verification",
+  "status": "passed",
+  "backup": {
+    "archive": "pre-update-2026-08-07-195503.zip",
+    "size_bytes": 528127053,
+    "zip_valid": true
+  },
+  "runtime": {
+    "hermes_version": "0.20.0",
+    "python_version": "3.11.15",
+    "sqlite_version": "3.53.1",
+    "doctor_blockers": [],
+    "single_gateway_running": true,
+    "gateway_process_count": 1,
+    "google_authenticated_read": true,
+    "telegram_polling_started": true,
+    "telegram_error_after_start": false,
+    "telegram_round_trip": "pending_user_observation"
+  },
+  "active_profile": {
+    "health_status": "consistent",
+    "managed_skill_count": 12,
+    "mismatched": [],
+    "active_extras": []
+  },
+  "repository": {
+    "pytest": {
+      "status": "passed",
+      "tests_passed": 71,
+      "tests_skipped": 2,
+      "subtests_passed": 17
+    },
+    "product_evals": {
+      "status": "passed",
+      "scenarios_passed": 19,
+      "scenarios_failed": 0
+    }
+  },
+  "external_workspace_writes": 0,
+  "release_state": "profile-ready",
+  "contains_secrets": false
+}
