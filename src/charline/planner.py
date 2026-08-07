@@ -42,7 +42,9 @@ def find_free_slots(
 
     output_tz = window_start.tzinfo
     start_utc, end_utc = _utc(window_start), _utc(window_end)
-    if end_utc <= start_utc or limit == 0:
+    if end_utc <= start_utc:
+        raise ValueError("window_end must be after window_start")
+    if limit == 0:
         return []
 
     blocked: list[Interval] = []

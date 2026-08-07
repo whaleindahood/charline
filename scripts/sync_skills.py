@@ -8,6 +8,7 @@ import os
 import shutil
 import stat
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -50,6 +51,19 @@ def _acquire_lock(lock_path: Path) -> None:
         os.write(descriptor, str(os.getpid()).encode("ascii"))
     finally:
         os.close(descriptor)
+
+
+def _tree_hashes(root: Path) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if any(part == "__pycache__" for part in relative.parts):
+            continue
+        if path.name.startswith(".hermes-tmp.") or path.suffix == ".pyc":
+            continue
+        if path.is_file() and not _is_link_or_reparse(path):
+            hashes[relative.as_posix()] = sha256(path.read_bytes()).hexdigest()
+    return hashes
 
 
 def sync_skills(
@@ -98,6 +112,9 @@ def sync_skills(
     _acquire_lock(lock_path)
     work_root = destination_root / ".charline-sync-work"
     try:
+        manifest_path = backup_root / "manifest.json"
+        if manifest_path.exists() or _is_link_or_reparse(manifest_path):
+            raise FileExistsError(f"backup manifest already exists: {manifest_path}")
         if _is_link_or_reparse(work_root):
             raise ValueError(f"link or reparse point is not allowed: {work_root}")
         if work_root.exists():
@@ -110,6 +127,7 @@ def sync_skills(
         for source in sources:
             shutil.copytree(source, staging_root / source.name, ignore=COPY_IGNORE)
 
+        manifest_skills = []
         for source in sources:
             target = destination_root / source.name
             if target.exists():
@@ -117,7 +135,30 @@ def sync_skills(
                 if backup_target.exists() or _is_link_or_reparse(backup_target):
                     raise FileExistsError(f"backup target already exists: {backup_target}")
                 backup_target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(target, backup_target)
+                shutil.copytree(target, backup_target, ignore=COPY_IGNORE)
+                files = _tree_hashes(backup_target)
+                existed = True
+            else:
+                files = {}
+                existed = False
+            manifest_skills.append(
+                {"name": source.name, "existed": existed, "files": files}
+            )
+
+        backup_root.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "skills": manifest_skills,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
 
         originals: dict[str, Path] = {}
         try:

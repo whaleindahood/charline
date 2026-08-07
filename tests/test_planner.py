@@ -13,6 +13,9 @@ class FindFreeSlotsTests(unittest.TestCase):
     def test_rejects_naive_datetimes(self):
         with self.assertRaisesRegex(ValueError,"timezone-aware"):
             find_free_slots(window_start=datetime(2026,8,3,9,0),window_end=datetime(2026,8,3,10,0),duration=timedelta(minutes=30),busy=[])
+    def test_rejects_reversed_window(self):
+        with self.assertRaisesRegex(ValueError,"window_end"):
+            find_free_slots(window_start=datetime(2026,8,3,10,0,tzinfo=MOSCOW),window_end=datetime(2026,8,3,9,0,tzinfo=MOSCOW),duration=timedelta(minutes=30),busy=[])
     def test_normalizes_mixed_busy_timezones_to_window_timezone(self):
         utc=ZoneInfo("UTC")
         slots=find_free_slots(window_start=datetime(2026,8,3,9,0,tzinfo=MOSCOW),window_end=datetime(2026,8,3,13,0,tzinfo=MOSCOW),duration=timedelta(hours=1),busy=[(datetime(2026,8,3,7,0,tzinfo=utc),datetime(2026,8,3,8,0,tzinfo=utc))])

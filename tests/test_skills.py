@@ -10,6 +10,13 @@ SKILLS = {
     "charline-calendar",
     "charline-research",
     "charline-briefing",
+    "charline-command-center",
+    "charline-development",
+    "charline-docs",
+    "charline-drive",
+    "charline-gmail",
+    "charline-reminders",
+    "charline-sheets",
 }
 
 

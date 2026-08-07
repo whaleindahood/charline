@@ -1,8 +1,10 @@
 import tempfile
 import unittest
+from subprocess import CompletedProcess
 from pathlib import Path
+from unittest.mock import patch
 
-from scripts.health_check import collect_health
+from scripts.health_check import collect_health, default_runner
 
 
 class HealthCheckTests(unittest.TestCase):
@@ -56,6 +58,23 @@ class HealthCheckTests(unittest.TestCase):
             self.assertFalse(result["checks"]["managed_skills"]["ok"])
             self.assertEqual(result["checks"]["managed_skills"]["detail"]["mismatched"], ["charline-test"])
 
+    def test_reports_degraded_when_active_profile_has_extra_charline_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, hermes = self.make_healthy_fixture(Path(tmp))
+            stale = hermes / "skills" / "productivity" / "charline-stale"
+            stale.mkdir()
+            (stale / "SKILL.md").write_text("stale", encoding="utf-8")
+            result = collect_health(
+                project_root=project,
+                hermes_home=hermes,
+                runner=lambda command: (0, "ok"),
+            )
+            self.assertEqual(result["status"], "degraded")
+            self.assertEqual(
+                result["checks"]["managed_skills"]["detail"]["extra"],
+                ["charline-stale"],
+            )
+
     def test_reports_degraded_instead_of_raising_on_unexpected_runner_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             project, hermes = self.make_healthy_fixture(Path(tmp))
@@ -66,6 +85,16 @@ class HealthCheckTests(unittest.TestCase):
             self.assertFalse(result["checks"]["hermes_version"]["ok"])
             self.assertFalse(result["checks"]["hermes_config"]["ok"])
             self.assertIn("runner exploded", result["checks"]["hermes_config"]["detail"])
+
+    @patch("scripts.health_check.subprocess.run")
+    def test_default_runner_retries_windows_access_violation_once(self, run):
+        run.side_effect = [
+            CompletedProcess(["hermes"], 3221225477, "", ""),
+            CompletedProcess(["hermes"], 0, "ok", ""),
+        ]
+
+        self.assertEqual(default_runner(["hermes", "config", "check"]), (0, "ok"))
+        self.assertEqual(run.call_count, 2)
 
 
 if __name__ == "__main__":

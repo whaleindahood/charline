@@ -7,6 +7,7 @@ name = "charline-assistant"
 version = "0.1.0"
 description = "Deterministic helpers and versioned policy for a Hermes-native personal assistant"
 requires-python = ">=3.11"
+dependencies = ["tzdata>=2025.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

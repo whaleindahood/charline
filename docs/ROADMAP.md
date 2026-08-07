@@ -1,57 +1,54 @@
 # Charline roadmap
 
-Charline is a general personal assistant built as a policy and capability layer inside Hermes Agent. Calendar is one capability, not the product boundary.
+Charline is a general personal assistant implemented as policy plus deterministic helpers inside Hermes Agent. Calendar is one capability, not the product boundary.
 
-## Release gates
+## Definition of V1
 
-Every phase requires focused tests, the full repository suite and verified runtime evidence appropriate to that phase. External writes remain disabled until preview, confirmation, idempotency and read-back behavior passes in a test account.
+V1 includes phases 0–5 below. A phase is code-complete only when its deterministic behavior, policy skill, focused tests and product evals are present. It is production-verified only after the separate live gates in `ACCEPTANCE.md` pass. External effects always retain per-operation confirmation; “release complete” never grants blanket write permission.
+
+## Status
+
+| Phase | Repository | Live proof |
+|---|---|---|
+| 0. Foundation | Complete | Pending active-profile sync and runtime check |
+| 1. Calendar | Complete | Pending authenticated read and confirmed sandbox write |
+| 2. Workspace | Complete within installed Google CLI surface | Pending authenticated reads/writes |
+| 3. Research | Complete | Provider availability checked at runtime |
+| 4. Briefing/reminders | Complete | Pending confirmed cron smoke test |
+| 5. Developer/usage | Complete | Deployment remains separately confirmed |
 
 ## Phase 0 — Foundation
 
-- recoverable Git history and isolated worker branches/worktrees;
-- safe skill install, verification and rollback;
-- explicit trust boundaries for Telegram, web and Google content;
-- honest health reporting and token/use observability;
-- stable Hermes Gateway and profile backup/restore.
+Exit criteria: standalone recoverable Git history; manifest-backed skill sync/restore; explicit content trust boundaries; transaction state machine; usage report; runtime diagnostics; focused and full tests.
 
 ## Phase 1 — Calendar vertical slice
 
-- agenda and availability reads from Google Calendar;
-- deterministic timezone, conflict, buffer and free-slot planning;
-- exact event preview, explicit confirmation, one idempotent write and read-back;
-- sandbox integration tests before production calendar writes.
+Exit criteria: agenda/availability policy; deterministic timezone, conflict, buffer and slot planning; exact preview and immutable confirmation hash; unknown-outcome reconciliation; read-back contract; eval coverage.
+
+Installed Google interface limitation: Calendar supports list/create/delete, but not get-by-ID, update or free/busy. Update requests remain drafts. Create verification uses a narrow list and returned event ID.
 
 ## Phase 2 — Gmail, Drive and documents
 
-- Gmail search, summaries and drafts;
-- confirmed email sending with recipient/content verification;
-- Drive search, organization and confirmed sharing;
-- Docs and Sheets read/draft workflows, then confirmed writes;
-- cross-service flows such as email evidence to calendar draft without implicit authorization.
+Exit criteria: Gmail, Drive, Docs and Sheets domain skills; reads direct; writes use the common transaction contract; cross-service authorization does not leak; unavailable verification blocks unsafe effects.
+
+Installed-interface limitations are explicit in `RELEASE.md`. In particular, Drive share/delete stays draft-only because current permission/trash read-back is insufficient.
 
 ## Phase 3 — Research and knowledge work
 
-- current multi-source research with citations;
-- bounded delegation only for independent workstreams;
-- comparison, synthesis and decision support;
-- reusable reviewed procedures in skills, not a second memory or routing system.
+Exit criteria: current source policy; primary-source priority; prompt-injection boundary; facts/inference/uncertainty separation; URL validation; no more than two independent workers; deterministic evidence normalization.
 
 ## Phase 4 — Briefing, reminders and recurring work
 
-- read-only morning and weekly briefing;
-- confirmed reminders and self-contained cron jobs;
-- per-source failure reporting and duplicate-delivery protection;
-- restore and restart tests for scheduled work.
+Exit criteria: deterministic partial-failure brief; conflict/overdue detection; self-contained reminder draft; timezone and schedule validation; idempotency key; Hermes cron is the only scheduler; exact confirmation and read-back policy.
 
 ## Phase 5 — Developer and extended capabilities
 
-- repository inspection, coding, testing and review workflows;
-- optional additional services through narrow skills and least-privileged tools;
-- usage budgets, context rotation and delegation limits;
-- Kanban only for durable multi-worker workflows proven to need it.
+Exit criteria: RED–GREEN–REFACTOR workflow; architecture guard against a second runtime/service SDKs; focused/full test gates; separate usage counters and budgets; bounded delegation; release and evidence procedures.
 
-## Deferred
+## Post-V1, opt-in only
 
-- Mini App, tunnel, reverse proxy and custom web shell;
-- custom agent runtime, scheduler, memory store or universal router;
-- autonomous external writes without an exact confirmed preview.
+- Additional services through narrow least-privileged skills.
+- Durable multi-worker Kanban only after a proven need.
+- Mini App, tunnel, reverse proxy or custom web client.
+
+Permanently excluded: a second agent runtime, scheduler, memory store, session system, delegation engine, universal router or autonomous unconfirmed external writes.

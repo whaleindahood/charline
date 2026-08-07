@@ -70,8 +70,11 @@ class EvaluationContractTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
         operations = (ROOT / "docs" / "OPERATIONS.md").read_text(encoding="utf-8").lower()
         roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8").lower()
-        self.assertIn("foundation", readme)
-        self.assertIn("not end-to-end ready", readme)
+        acceptance = (ROOT / "docs" / "ACCEPTANCE.md").read_text(encoding="utf-8").lower()
+        self.assertIn("repository surface is implemented", readme)
+        self.assertIn("deployment to the active profile", readme)
+        self.assertIn("repository-complete", acceptance)
+        self.assertIn("production-verified", acceptance)
         for heading in ("## install", "## verify", "## rollback"):
             self.assertIn(heading, operations)
         self.assertIn("exception-safe", operations)

@@ -4,7 +4,7 @@
 
 1. Back up the active Hermes profile through the supported Hermes backup command.
 2. Run the repository tests.
-3. Run `python scripts/sync_skills.py` with an explicit Hermes home and a new backup directory.
+3. Review the exact managed skill list and backup path, obtain confirmation, then run `python scripts/sync_skills.py` with an explicit Hermes home and a new backup directory.
 4. Do not run two sync processes against the same profile.
 
 Skill sync is exception-safe: a caught activation failure restores the prior managed skill set. It is not crash-atomic; process or machine termination during activation can require rollback from the backup.
@@ -20,7 +20,7 @@ Skill sync is exception-safe: a caught activation failure restores the prior man
 ## Rollback
 
 1. Stop the single Hermes Gateway before changing active skill files.
-2. Restore the complete `productivity/charline-*` set from one matching backup.
+2. Restore the complete `productivity/charline-*` set with `python scripts/restore_skills.py <backup-dir> --hermes-home <path>` after confirming the exact target.
 3. Run the repository tests and health check.
 4. Start one Gateway and verify Telegram plus a read-only Google request.
 
@@ -36,7 +36,7 @@ Skill sync is exception-safe: a caught activation failure restores the prior man
 2. `hermes config check`
 3. `hermes doctor`
 4. Verify the active Telegram route by receiving a message in the main chat.
-5. Verify Google Workspace authentication with its setup `--check` command.
+5. Run `python scripts/runtime_check.py --hermes-home <path> --live-google`; note that OAuth validation may refresh the local token.
 6. Run the repository tests.
 
 ## Incident response

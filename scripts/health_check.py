@@ -13,15 +13,20 @@ Runner = Callable[[Sequence[str]], tuple[int, str]]
 
 
 def default_runner(command: Sequence[str]) -> tuple[int, str]:
-    completed = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=30,
-        check=False,
-    )
+    completed = None
+    for attempt in range(2):
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        if completed.returncode not in {3221225477, -1073741819} or attempt == 1:
+            break
+    assert completed is not None
     output = (completed.stdout or completed.stderr).strip()
     return completed.returncode, output
 
@@ -64,13 +69,27 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
         target = destination_root / source.name
         if not target.is_dir() or _tree_manifest(source) != _tree_manifest(target):
             mismatched.append(source.name)
+    source_names = {source.name for source in source_skills}
+    active_names = {
+        path.name
+        for path in destination_root.glob("charline-*")
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    }
+    extra = sorted(active_names - source_names)
 
     version_code, version_output = _run_check(runner, ["hermes", "--version"])
     config_code, config_output = _run_check(runner, ["hermes", "config", "check"])
 
     checks = {
         "independent_git": {"ok": (project_root / ".git").is_dir(), "detail": str(project_root / ".git")},
-        "managed_skills": {"ok": len(source_skills) >= 1 and not mismatched, "detail": {"count": len(source_skills), "mismatched": mismatched}},
+        "managed_skills": {
+            "ok": len(source_skills) >= 1 and not mismatched and not extra,
+            "detail": {
+                "count": len(source_skills),
+                "mismatched": mismatched,
+                "extra": extra,
+            },
+        },
         "google_oauth_files": {
             "ok": (hermes_home / "google_token.json").is_file() and (hermes_home / "google_client_secret.json").is_file(),
             "detail": "presence checked; contents not read",

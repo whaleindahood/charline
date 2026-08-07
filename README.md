@@ -4,7 +4,7 @@ Charline is a Hermes-native general personal assistant configuration, not a seco
 
 ## Current status
 
-This repository is the V1 foundation and is not end-to-end ready. Policy, deterministic helpers and operational controls are being stabilized before live Workspace writes or recurring automation are enabled.
+The V1 repository surface is implemented: common transaction safety, Calendar and Workspace policy, sourced research, briefings, reminders, developer workflows, usage controls, evals and recovery tooling. Deployment to the active profile and live external effects remain separate evidence-based release gates.
 
 ## Product contract
 
@@ -23,12 +23,13 @@ This repository is the V1 foundation and is not end-to-end ready. Policy, determ
 - `scripts/` — reproducible install, health and backup operations.
 - `tests/` — executable tests.
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for capability order and release gates.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for scope and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for release gates.
 
 ## Development
 
-```bash
-python -m unittest discover -s tests -v
+```powershell
+python -m pytest -q
+python scripts/run_evals.py
 ```
 
 The active Hermes profile remains the current `default` profile. This repository is the source of truth for Charline-owned artifacts; secrets and Hermes runtime state never belong here.

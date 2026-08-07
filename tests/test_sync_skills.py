@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,13 +26,21 @@ class SyncSkillsTests(unittest.TestCase):
             (existing / "SKILL.md").write_text("old skill", encoding="utf-8")
             backup = base / "backup"
             installed = sync_skills(source_root=ROOT / "skills" / "productivity", hermes_home=hermes_home, backup_root=backup)
-            self.assertEqual(len(installed), 5)
+            expected = {
+                path.name
+                for path in (ROOT / "skills" / "productivity").glob("charline-*")
+                if (path / "SKILL.md").is_file()
+            }
+            self.assertEqual(set(installed), expected)
             self.assertIn("charline-orchestration", installed)
             self.assertTrue((backup / "productivity" / "charline-orchestration" / "SKILL.md").exists())
             for name in installed:
                 target = hermes_home / "skills" / "productivity" / name / "SKILL.md"
                 self.assertTrue(target.exists())
                 self.assertIn(f"name: {name}", target.read_text(encoding="utf-8"))
+            manifest = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertTrue(any(item["name"] == "charline-orchestration" and item["existed"] for item in manifest["skills"]))
 
     def test_does_not_install_runtime_temp_or_python_cache_files(self):
         with tempfile.TemporaryDirectory() as tmp:
