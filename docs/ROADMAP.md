@@ -10,7 +10,7 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 
 | Phase | Repository | Live proof |
 |---|---|---|
-| 0. Foundation | Complete | Pending active-profile sync and runtime check |
+| 0. Foundation | Complete | Profile synced; final runtime gate pending OAuth/security checks |
 | 1. Calendar | Complete | Pending authenticated read and confirmed sandbox write |
 | 2. Workspace | Complete within installed Google CLI surface | Pending authenticated reads/writes |
 | 3. Research | Complete | Provider availability checked at runtime |

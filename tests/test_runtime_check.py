@@ -29,7 +29,7 @@ class RuntimeCheckTests(unittest.TestCase):
                 if "config check" in joined:
                     return 0, "✓ TELEGRAM_BOT_TOKEN\n✓ TELEGRAM_ALLOWED_USERS"
                 if "gateway status" in joined:
-                    return 0, "Running\nPID(s): 123"
+                    return 0, "Gateway process running (PID: 123)"
                 if "--check-live" in joined:
                     return 0, "AUTHENTICATED LIVE_OK"
                 return 0, "doctor ok"
@@ -131,6 +131,7 @@ class RuntimeCheckTests(unittest.TestCase):
 
         self.assertEqual(default_runner(["hermes", "doctor"]), (0, "ok"))
         self.assertEqual(run.call_count, 2)
+        self.assertTrue(all(call.kwargs["timeout"] == 90 for call in run.call_args_list))
 
 
 if __name__ == "__main__":

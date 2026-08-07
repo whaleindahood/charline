@@ -35,6 +35,7 @@ def default_hermes_home() -> Path:
 def default_runner(command: Sequence[str]) -> tuple[int, str]:
     """Run one bounded diagnostic command and combine stdout/stderr."""
 
+    timeout = 90 if tuple(map(str, command)) == ("hermes", "doctor") else 30
     completed = None
     for attempt in range(2):
         completed = subprocess.run(
@@ -43,7 +44,7 @@ def default_runner(command: Sequence[str]) -> tuple[int, str]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=timeout,
             check=False,
         )
         if completed.returncode not in {3221225477, -1073741819} or attempt == 1:
@@ -108,7 +109,11 @@ def collect_runtime(
         and _configured(config_text, "TELEGRAM_BOT_TOKEN")
         and _configured(config_text, "TELEGRAM_ALLOWED_USERS")
     )
-    pid_match = re.search(r"PID\(s\):\s*([0-9,\s]+)", gateway_text, re.IGNORECASE)
+    pid_match = re.search(
+        r"PID(?:\(s\))?:\s*([0-9,\s]+)",
+        gateway_text,
+        re.IGNORECASE,
+    )
     pids = []
     if pid_match:
         pids = sorted(
