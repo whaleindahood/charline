@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-07T18:26:14Z",
+  "repository_commit": "1887eb19c085cec3883f5f3119445dd26d52e083",
+  "operation": "charline_v1_final_release_verification",
+  "repository": {
+    "pytest": {
+      "status": "passed",
+      "tests_passed": 75,
+      "tests_skipped": 2,
+      "subtests_passed": 17
+    },
+    "product_evals": {
+      "status": "passed",
+      "scenarios_passed": 19,
+      "scenarios_failed": 0
+    },
+    "compileall": "passed"
+  },
+  "active_profile": {
+    "status": "consistent",
+    "managed_skill_count": 12,
+    "mismatched_skills": [],
+    "extra_managed_skills": []
+  },
+  "runtime": {
+    "status": "ready",
+    "hermes_version": "0.20.0",
+    "config_valid": true,
+    "doctor_blockers": [],
+    "gateway_process_count": 1,
+    "openai_codex_authenticated": true,
+    "google_authenticated_read": true,
+    "telegram_round_trip_user_observed": true,
+    "browser_smoke_passed": true
+  },
+  "confirmed_sandbox_effects": {
+    "calendar_create_read_delete_absence": true,
+    "gmail_send_read_back_user_observed": true,
+    "docs_append_read_back": true,
+    "sheets_update_read_back": true,
+    "reminder_create_read_run_delivery_remove_absence": true
+  },
+  "usage_7d": {
+    "status": "attention",
+    "api_calls": 199,
+    "historical_subagent_api_calls": 61,
+    "active_subagents": 0
+  },
+  "non_blocking_notes": [
+    "Optional providers and tools remain unconfigured by design.",
+    "Hermes npm audit reports build-tool advisories outside the V1 runtime path.",
+    "Old high-volume sessions trigger usage rotation advisories."
+  ],
+  "release_state": "production-verified",
+  "contains_message_content": false,
+  "contains_telegram_identifiers": false,
+  "contains_credentials": false
+}

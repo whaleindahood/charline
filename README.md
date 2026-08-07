@@ -4,7 +4,7 @@ Charline is a Hermes-native general personal assistant configuration, not a seco
 
 ## Current status
 
-The V1 repository surface is implemented: common transaction safety, Calendar and Workspace policy, sourced research, briefings, reminders, developer workflows, usage controls, evals and recovery tooling. Deployment to the active profile and live external effects remain separate evidence-based release gates.
+V1 is production-verified: the repository surface, active Hermes profile, authenticated reads, Telegram round trip and confirmed sandbox effects have passed their evidence-based release gates. Future external writes still require a fresh exact preview and explicit confirmation.
 
 ## Product contract
 

@@ -4,7 +4,7 @@
   "repository_commit": "c8df8d4",
   "operation": "confirmed_one_time_telegram_reminder",
   "confirmation": "C4",
-  "status": "verified_cleanup_pending",
+  "status": "verified_and_cleaned",
   "job": {
     "job_id": "f4b3a74e3c88",
     "schedule": "once at 2026-08-08 09:00",
@@ -25,7 +25,11 @@
     "response_included_idempotency_key": true,
     "user_observed_delivery": true
   },
-  "cleanup": "pending_separate_confirmation_C4D",
+  "cleanup": {
+    "confirmation": "C4D",
+    "job_absent_after_removal": true,
+    "output_directory_absent_after_removal": true
+  },
   "contains_message_content": false,
   "contains_telegram_identifiers": false,
   "contains_secrets": false

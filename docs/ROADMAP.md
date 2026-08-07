@@ -14,7 +14,7 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 | 1. Calendar | Complete | Authenticated read and confirmed create/read-back/delete/absence sandbox proof passed |
 | 2. Workspace | Complete within installed Google CLI surface | Gmail, Drive and Contacts reads passed; confirmed Gmail self-send, Docs append and Sheets update read-back passed |
 | 3. Research | Complete | Browser provider available; optional structured web provider is not configured |
-| 4. Briefing/reminders | Complete | Confirmed cron create/read-back/run and user-observed delivery passed; separately confirmed cleanup pending |
+| 4. Briefing/reminders | Complete | Confirmed cron create/read-back/run, user-observed delivery and separately confirmed cleanup passed |
 | 5. Developer/usage | Complete | Deployment remains separately confirmed |
 
 ## Phase 0 — Foundation
