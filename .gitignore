@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Hermes/profile state and credentials
+.env
+.env.*
+.hermes/
+*.token
+*secret*.json
+*credentials*.json
+*.pem
+*.key
+google_token.json
+google_client_secret.json
+auth.json
+state.db
+*.db
+*.sqlite
+*.sqlite3
+sessions/
+logs/
+
+# Local deployment/runtime
+.hermes-tmp.*
+*.log
+*.pid
+backups/
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
