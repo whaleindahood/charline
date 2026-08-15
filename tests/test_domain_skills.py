@@ -56,6 +56,23 @@ class DomainSkillPolicyTests(unittest.TestCase):
         ):
             self.assertIn(phrase, text)
 
+    def test_charline_entrypoint_documents_native_telegram_panel(self):
+        text = self.read_skill("charline")
+        for phrase in (
+            "native telegram inline buttons",
+            "календарь",
+            "почта",
+            "файлы",
+            "задачи",
+            "проекты",
+            "новая задача",
+            "same card",
+            "existing task center",
+            "existing project center",
+            "does not start a google operation",
+        ):
+            self.assertIn(phrase, text)
+
     def test_calendar_defines_quiet_fast_booking_flow(self):
         text = self.read_skill("charline-calendar")
         for phrase in (

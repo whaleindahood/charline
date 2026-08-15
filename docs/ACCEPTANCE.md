@@ -57,7 +57,7 @@ Do not use Drive share/delete as a V1 proof until the installed interface expose
 
 Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 
-1. Confirm `/charline` is visible and returns a concise Russian capability menu.
+1. Confirm `/charline` opens one native Telegram card with `Календарь`, `Почта`, `Файлы`, `Задачи`, `Проекты` and `Новая задача`; category details and `Назад` edit that card, while task/project buttons open their existing scoped centers.
 2. Send a natural-language meeting request without duration; receive one short duration question, then no progress chatter and one complete preview; cancel without a write.
 3. Repeat the request by Russian voice; verify the transcript and cancel at the final confirmation.
 4. Request a busy slot; receive one conflict message with the nearest available start as an exact alternative preview.

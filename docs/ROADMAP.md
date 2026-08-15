@@ -16,7 +16,7 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 | 3. Research | Complete | Browser provider available; optional structured web provider is not configured |
 | 4. Briefing/reminders | Complete | Confirmed cron create/read-back/run, user-observed delivery and separately confirmed cleanup passed |
 | 5. Developer/usage | Complete | Deployment remains separately confirmed |
-| 6. Native conversational UX | Complete | Rich tables/drafts active; `/projects`, recent task results and labelled confirmation buttons require final live proof |
+| 6. Native conversational UX | Complete | Native `/charline` panel implemented; activation plus `/projects`, recent task results and labelled confirmation buttons require final live proof |
 
 ## Phase 0 — Foundation
 

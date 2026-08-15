@@ -32,6 +32,18 @@ Finish with: "Напишите или надиктуйте задачу обыч
 
 Use normal Markdown headings, lists and links. Use Markdown tables only for compact comparisons or state snapshots with few short columns. Telegram Rich Messages render those tables when enabled; fall back to lists automatically on unsupported clients. Never force tables into narrow task controls: `/tasks` uses one editable native message with inline buttons.
 
+## Native Telegram Panel
+
+On Telegram, `/charline` uses native Telegram inline buttons in one editable card:
+
+- `Календарь` and `Почта` show short natural-language examples.
+- `Файлы` shows Google Drive and document examples.
+- `Задачи` opens the existing task center.
+- `Проекты` opens the existing project center.
+- `Новая задача` asks the user to write or dictate the request normally.
+
+Category details and `Назад` edit the same card. Opening the panel or a category does not start a Google operation, background task or external write. The user must still state the requested action, and the matching domain skill keeps its normal confirmation rules.
+
 ## Native Hermes Boundary
 
 Accept natural language and voice through the existing Hermes Gateway. After the user chooses or states a task, load the matching domain skill and follow `charline-orchestration`. Use Hermes sessions/topics, Memory, `clarify`, `delegate_task`, `/background`, cron and project surfaces directly.

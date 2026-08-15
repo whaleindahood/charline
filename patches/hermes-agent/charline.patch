@@ -43,7 +43,7 @@ index a60e5291b5b5f0915270e43cc3637f2c0f65ff22..6ff302488f2987b29ec00a268d1b0636
          #
          # grok models on xAI's /v1/responses surface have a *native*,
 diff --git a/gateway/run.py b/gateway/run.py
-index 83342c39591b100101ab24fdcf59572392af7dec..057abf97744d293c60b8d32bf21054c77dee4263 100644
+index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e9728079293b93 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -3029,6 +3029,44 @@ def _is_control_interrupt_message(message: Optional[str]) -> bool:
@@ -136,15 +136,16 @@ index 83342c39591b100101ab24fdcf59572392af7dec..057abf97744d293c60b8d32bf21054c7
          _busy_state = self._peek_session_state(session_key)
          running_agent = _busy_state.turn.agent if _busy_state else None
  
-@@ -14296,6 +14358,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14296,6 +14358,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  "approve": self._handle_approve_command,
                  "deny": self._handle_deny_command,
                  "agents": self._handle_agents_command,
 +                "projects": self._handle_projects_command,
++                "charline": self._handle_charline_command,
                  "background": self._handle_background_command,
                  "kanban": self._handle_kanban_command,
                  "subgoal": self._handle_subgoal_command,
-@@ -14337,6 +14400,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14337,6 +14401,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          return format_status_text()
  
      async def _busy_stop_command(self, event: MessageEvent, quick_key: str, source):
@@ -154,7 +155,7 @@ index 83342c39591b100101ab24fdcf59572392af7dec..057abf97744d293c60b8d32bf21054c7
          # /stop must hard-kill the session when an agent is running.
          # A soft interrupt (agent.interrupt()) doesn't help when the agent
          # is truly hung — the executor thread is blocked and never checks
-@@ -14791,7 +14857,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14791,7 +14858,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # with an empty response.
              if _raw_clarify_reply and not _raw_clarify_reply.startswith("/"):
                  _resolved = _clarify_mod.resolve_text_response_for_session(
@@ -165,7 +166,7 @@ index 83342c39591b100101ab24fdcf59572392af7dec..057abf97744d293c60b8d32bf21054c7
                  )
                  if _resolved:
                      logger.info(
-@@ -14966,6 +15034,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14966,6 +15035,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      event, _cmd_def_inner, _quick_key, source,
                  )
  
@@ -182,25 +183,68 @@ index 83342c39591b100101ab24fdcf59572392af7dec..057abf97744d293c60b8d32bf21054c7
              if event.message_type == MessageType.PHOTO:
                  logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
                  adapter = self._adapter_for_source(source)
-@@ -15251,6 +15329,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -15251,6 +15330,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
  
          if canonical == "topic":
              return await self._handle_topic_command(event)
 +
 +        if canonical == "projects":
 +            return await self._handle_projects_command(event)
++
++        if canonical == "charline" and source.platform == Platform.TELEGRAM:
++            return await self._handle_charline_command(event)
          
          if canonical == "help":
              return await self._handle_help_command(event)
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828cfd12bbe 100644
+index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac33d564c7d 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
-@@ -1194,19 +1194,22 @@ class GatewaySlashCommandsMixin:
+@@ -1194,19 +1194,62 @@ class GatewaySlashCommandsMixin:
              return True
          return await self._resume_target_allowed(source, sid, allow_override=False)
  
 -    async def _handle_agents_command(self, event: MessageEvent) -> str:
++    async def _handle_charline_command(self, event: MessageEvent) -> Union[str, None]:
++        """Open Charline's native Telegram navigation panel."""
++        adapter = self._adapter_for_source(event.source)
++        send_menu = (
++            getattr(type(adapter), "send_charline_menu", None) if adapter else None
++        )
++        if callable(send_menu):
++            async def _on_action(action: str) -> Union[str, None]:
++                if action == "tasks":
++                    denied = self._check_slash_access(event.source, "agents")
++                    if denied:
++                        return denied
++                    return await self._handle_agents_command(event)
++                if action == "projects":
++                    denied = self._check_slash_access(event.source, "projects")
++                    if denied:
++                        return denied
++                    return await self._handle_projects_command(event)
++                return None
++
++            result = await adapter.send_charline_menu(
++                chat_id=event.source.chat_id,
++                session_key=self._session_key_for_source(event.source),
++                owner_user_id=str(event.source.user_id or ""),
++                on_action=_on_action,
++                metadata=self._thread_metadata_for_source(
++                    event.source, self._reply_anchor_for_event(event)
++                ),
++            )
++            if result.success:
++                return None
++
++        return (
++            "Charline\n\n"
++            "• Календарь, почта и Google Workspace\n"
++            "• Задачи и параллельная работа\n"
++            "• Проекты в темах Telegram\n\n"
++            "Напишите задачу обычными словами."
++        )
++
 +    async def _handle_agents_command(self, event: MessageEvent) -> Union[str, None]:
          """Handle /agents command - list active agents and running tasks."""
          from gateway.run import _AGENT_PENDING_SENTINEL
@@ -220,7 +264,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
              started = float(running_started.get(session_key, now))
              elapsed = max(0, int(now - started))
              is_pending = agent is _AGENT_PENDING_SENTINEL
-@@ -1225,17 +1228,12 @@ class GatewaySlashCommandsMixin:
+@@ -1225,17 +1268,12 @@ class GatewaySlashCommandsMixin:
          running_processes: list[dict] = []
          try:
              running_processes = [
@@ -239,7 +283,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
          lines = [
              t("gateway.agents.header"),
              "",
-@@ -1272,21 +1270,16 @@ class GatewaySlashCommandsMixin:
+@@ -1272,21 +1310,16 @@ class GatewaySlashCommandsMixin:
              if len(running_processes) > 12:
                  lines.append(t("gateway.agents.more", count=len(running_processes) - 12))
  
@@ -265,7 +309,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
                  if d.get("status") in ("running", "stalling", "finalizing")
              ]
          except Exception:
-@@ -1334,18 +1327,409 @@ class GatewaySlashCommandsMixin:
+@@ -1334,18 +1367,409 @@ class GatewaySlashCommandsMixin:
                      t("gateway.agents.more", count=len(delegations) - 12)
                  )
  
@@ -333,9 +377,8 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
 +            if result.success:
 +                return None
 +
-         return "\n".join(lines)
- 
--    async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
++        return "\n".join(lines)
++
 +    def _collect_task_center_items(
 +        self, session_key: str, parent_session_id: str = ""
 +    ) -> list[dict]:
@@ -470,8 +513,9 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
 +                ),
 +            ]
 +        )
-+        return "\n".join(lines)
-+
+         return "\n".join(lines)
+ 
+-    async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
 +    def _collect_stop_menu_items(
 +        self, session_key: str, parent_session_id: str = ""
 +    ) -> list[dict]:
@@ -677,7 +721,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
          """Handle /stop command - interrupt a running agent.
  
          When an agent is truly hung (blocked thread that never checks
-@@ -1361,6 +1745,36 @@ class GatewaySlashCommandsMixin:
+@@ -1361,6 +1785,36 @@ class GatewaySlashCommandsMixin:
          session_entry = await self.async_session_store.get_or_create_session(source)
          session_key = session_entry.session_key
  
@@ -714,7 +758,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
          agent = self._running_agents.get(session_key)
          if agent is _AGENT_PENDING_SENTINEL:
              # Force-clean the sentinel so the session is unlocked.
-@@ -1411,6 +1825,23 @@ class GatewaySlashCommandsMixin:
+@@ -1411,6 +1865,23 @@ class GatewaySlashCommandsMixin:
          # assistant.threads.setStatus survives a gateway restart or a turn
          # that died without a final send (#32295). Best-effort clear so
          # /stop always dismisses a phantom "is thinking...".
@@ -738,7 +782,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
          adapter = getattr(self, "adapters", {}).get(source.platform)
          if adapter and hasattr(adapter, "_stop_typing_with_metadata"):
              try:
-@@ -5432,7 +5863,12 @@ class GatewaySlashCommandsMixin:
+@@ -5432,7 +5903,12 @@ class GatewaySlashCommandsMixin:
          else:
              choice = "once"
  
@@ -752,7 +796,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
          if not count:
              return t("gateway.approve.no_pending")
  
-@@ -5486,6 +5922,7 @@ class GatewaySlashCommandsMixin:
+@@ -5486,6 +5962,7 @@ class GatewaySlashCommandsMixin:
          count = resolve_gateway_approval(
              session_key, "deny", resolve_all=resolve_all,
              reason=reason or None,
@@ -761,7 +805,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..499bb38dace97d485d82331d213d7828
          if not count:
              return t("gateway.deny.no_pending")
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index f3323f020ae1d038e3fd732a1a48237b36212d4f..b235b9b32158a3fb151df806966ed0a8c87975ff 100644
+index f3323f020ae1d038e3fd732a1a48237b36212d4f..493dc428c306dcb4eaa4710d04f6eed9d27bfbd2 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -18,6 +18,7 @@ import subprocess
@@ -772,16 +816,18 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..b235b9b32158a3fb151df806966ed0a8
  from typing import Any
  
  from utils import is_truthy_value
-@@ -108,6 +109,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
+@@ -108,6 +109,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                 busy_policy="interrupt_then_dispatch", busy_handler="new"),
      CommandDef("topic", "Enable or inspect Telegram DM topic sessions", "Session",
                 gateway_only=True, args_hint="[off|help|session-id]"),
 +    CommandDef("projects", "Show Telegram project topics and active work", "Session",
 +               gateway_only=True, args_hint="[page]", busy_policy="dispatch"),
++    CommandDef("charline", "Open the Charline assistant menu", "Session",
++               gateway_only=True, busy_policy="dispatch"),
      CommandDef("clear", "Clear screen and start a new session", "Session",
                 cli_only=True),
      CommandDef("redraw", "Force a full UI repaint (recovers from terminal drift)", "Session",
-@@ -137,7 +140,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
+@@ -137,7 +142,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
                 cli_only=True, args_hint="[profile] [-o output.tar.gz]"),
      CommandDef("import", "Import a shared profile archive as a new profile", "Configuration",
                 cli_only=True, args_hint="<archive.tar.gz> [--name <name>]"),
@@ -790,7 +836,7 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..b235b9b32158a3fb151df806966ed0a8
                 busy_policy="interrupt_then_dispatch", busy_handler="stop"),
      CommandDef("approve", "Approve a pending dangerous command", "Session",
                 gateway_only=True, args_hint="[session|always]", busy_policy="dispatch"),
-@@ -619,7 +622,9 @@ def telegram_bot_commands() -> list[tuple[str, str]]:
+@@ -619,7 +624,9 @@ def telegram_bot_commands() -> list[tuple[str, str]]:
          # Built-in arg-taking commands are included — their handlers show
          # usage text when invoked without arguments, and hiding them from
          # the menu hurts discoverability (issue #24312).
@@ -801,7 +847,7 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..b235b9b32158a3fb151df806966ed0a8
          if tg_name:
              result.append((tg_name, cmd.description))
      for name, description, args_hint in _iter_plugin_command_entries():
-@@ -927,27 +932,25 @@ def _collect_gateway_skill_entries(
+@@ -927,27 +934,25 @@ def _collect_gateway_skill_entries(
          from agent.skill_commands import get_skill_commands
          from tools.skills_tool import SKILLS_DIR
          from agent.skill_utils import get_external_skills_dirs
@@ -838,7 +884,7 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..b235b9b32158a3fb151df806966ed0a8
                  continue
              skill_name = info.get("name", "")
              if skill_name in _platform_disabled:
-@@ -997,22 +1000,22 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
+@@ -997,22 +1002,22 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
          (menu_commands, hidden_count) where hidden_count is the number of
          commands omitted due to the cap.
      """
@@ -867,14 +913,14 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..b235b9b32158a3fb151df806966ed0a8
  
  
  def discord_skill_commands(
-@@ -1272,7 +1275,10 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
+@@ -1272,7 +1277,10 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
  #   - refine: on-demand memory/skill review; reached via /hermes refine on
  #     Slack. Added at the 50-cap — a native slot would clamp an existing
  #     native slash.
 -_SLACK_VIA_HERMES_ONLY = frozenset({"topup", "moa", "debug", "egress", "init", "version", "diff", "update", "heartbeat", "refine"})
 +_SLACK_VIA_HERMES_ONLY = frozenset({
 +    "topup", "moa", "debug", "egress", "init", "version", "diff",
-+    "update", "heartbeat", "refine", "platform", "tasks",
++    "update", "heartbeat", "refine", "platform", "tasks", "charline",
 +})
  
  
@@ -945,7 +991,7 @@ index 81a56b1b83905214586536feb6cfdab165e9cd48..3501fa43604b6c00bd36e5fd46c3fbe3
    "engines": {
      "node": ">=22.22.0",
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d588d79e3 100644
+index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097db9324fe6 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,7 @@ import logging
@@ -956,15 +1002,16 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
  import threading
  import time
  from contextvars import ContextVar
-@@ -876,6 +877,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -876,6 +877,8 @@ class TelegramAdapter(BasePlatformAdapter):
          # Clarify button state: clarify_id → session_key (for the clarify tool's
          # multiple-choice prompts; see GatewayRunner clarify_callback wiring).
          self._clarify_state: Dict[str, str] = {}
 +        self._stop_menu_state: Dict[str, dict] = {}
++        self._charline_menu_state: Dict[str, dict] = {}
          # Notification mode for message sends.
          # "important" — only final responses, approvals, and slash confirmations
          #               trigger notifications; tool progress, streaming, status
-@@ -5705,16 +5707,19 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5705,16 +5708,19 @@ class TelegramAdapter(BasePlatformAdapter):
                  # Telegram caps callback_data at 64 bytes; keep "cl:<id>:<idx>"
                  # short.
                  rows = []
@@ -987,10 +1034,120 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
                          callback_data=f"cl:{clarify_id}:other",
                      )
                  ])
-@@ -5738,6 +5743,158 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5738,6 +5744,268 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.warning("[%s] send_clarify failed: %s", self.name, _redact_telegram_error_text(e))
              return SendResult(success=False, error=_redact_telegram_error_text(e))
  
++    @staticmethod
++    def _render_charline_panel(menu_id: str, section: str = "home") -> tuple[str, Any]:
++        if section == "home":
++            rows = [
++                [
++                    InlineKeyboardButton("Календарь", callback_data=f"ch:{menu_id}:calendar"),
++                    InlineKeyboardButton("Почта", callback_data=f"ch:{menu_id}:mail"),
++                ],
++                [
++                    InlineKeyboardButton("Файлы", callback_data=f"ch:{menu_id}:files"),
++                    InlineKeyboardButton("Задачи", callback_data=f"ch:{menu_id}:tasks"),
++                ],
++                [
++                    InlineKeyboardButton("Проекты", callback_data=f"ch:{menu_id}:projects"),
++                    InlineKeyboardButton("Новая задача", callback_data=f"ch:{menu_id}:new"),
++                ],
++            ]
++            return (
++                "<b>Charline</b>\n\nВыберите раздел или напишите задачу обычными словами.",
++                InlineKeyboardMarkup(rows),
++            )
++
++        details = {
++            "calendar": (
++                "<b>Календарь</b>\n\n"
++                "Напишите, например:\n"
++                "• Покажи расписание на сегодня\n"
++                "• Найди свободное время завтра\n"
++                "• Создай встречу в пятницу в 15:00"
++            ),
++            "mail": (
++                "<b>Почта</b>\n\n"
++                "Напишите, например:\n"
++                "• Покажи важные непрочитанные письма\n"
++                "• Найди письмо от Ивана\n"
++                "• Подготовь ответ"
++            ),
++            "files": (
++                "<b>Файлы</b>\n\n"
++                "Напишите, например:\n"
++                "• Найди план проекта на Google Drive\n"
++                "• Покажи последние документы\n"
++                "• Создай документ по моему черновику"
++            ),
++            "new": (
++                "<b>Новая задача</b>\n\n"
++                "Напишите или продиктуйте задачу обычными словами."
++            ),
++        }
++        text = details.get(section)
++        if text is None:
++            raise ValueError("unknown Charline panel section")
++        return text, InlineKeyboardMarkup([[
++            InlineKeyboardButton("Назад", callback_data=f"ch:{menu_id}:home")
++        ]])
++
++    async def send_charline_menu(
++        self,
++        chat_id: str,
++        session_key: str,
++        on_action,
++        owner_user_id: str = "",
++        metadata: Optional[Dict[str, Any]] = None,
++    ) -> SendResult:
++        """Render Charline navigation with native Telegram buttons."""
++        if not self._bot:
++            return SendResult(success=False, error="Not connected")
++        menu_id = secrets.token_hex(4)
++        text, keyboard = self._render_charline_panel(menu_id)
++        thread_id = self._metadata_thread_id(metadata)
++        try:
++            reply_to_id = self._reply_to_message_id_for_send(None, metadata)
++            kwargs: Dict[str, Any] = {
++                "chat_id": normalize_telegram_chat_id(chat_id),
++                "text": text,
++                "parse_mode": ParseMode.HTML,
++                "reply_markup": keyboard,
++                "reply_to_message_id": reply_to_id,
++                **self._link_preview_kwargs(),
++            }
++            kwargs.update(
++                self._thread_kwargs_for_send(
++                    chat_id,
++                    thread_id,
++                    metadata,
++                    reply_to_message_id=reply_to_id,
++                )
++            )
++            message = await self._send_message_with_thread_fallback(**kwargs)
++            for stale_id, stale in list(self._charline_menu_state.items()):
++                if stale.get("session_key") == session_key:
++                    self._charline_menu_state.pop(stale_id, None)
++            self._charline_menu_state[menu_id] = {
++                "session_key": session_key,
++                "owner_user_id": str(owner_user_id or ""),
++                "chat_id": str(normalize_telegram_chat_id(chat_id)),
++                "thread_id": str(thread_id or ""),
++                "message_id": str(message.message_id),
++                "created_at": time.monotonic(),
++                "callback": on_action,
++            }
++            return SendResult(success=True, message_id=str(message.message_id))
++        except Exception as exc:
++            logger.warning(
++                "[%s] send_charline_menu failed: %s",
++                self.name,
++                _redact_telegram_error_text(exc),
++            )
++            return SendResult(success=False, error=_redact_telegram_error_text(exc))
++
 +    async def send_stop_menu(
 +        self,
 +        chat_id: str,
@@ -1146,10 +1303,84 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
      async def send_model_picker(
          self,
          chat_id: str,
-@@ -6415,6 +6572,113 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6415,6 +6683,187 @@ class TelegramAdapter(BasePlatformAdapter):
          query_thread_id = getattr(query_message, "message_thread_id", None)
          query_user_name = getattr(query.from_user, "first_name", None)
  
++        # --- Charline navigation callbacks (ch:menu_id:action) ---
++        if data.startswith("ch:"):
++            parts = data.split(":", 2)
++            if len(parts) != 3:
++                await query.answer(text="Invalid Charline action.")
++                return
++            caller_id = str(getattr(query.from_user, "id", ""))
++            if not self._is_callback_user_authorized(
++                caller_id,
++                chat_id=query_chat_id,
++                chat_type=str(query_chat_type) if query_chat_type is not None else None,
++                thread_id=str(query_thread_id) if query_thread_id is not None else None,
++                user_name=query_user_name,
++            ):
++                await query.answer(text="You are not authorized to use this menu.")
++                return
++
++            menu_id, action = parts[1], parts[2]
++            now = time.monotonic()
++            for stale_id, stale in list(self._charline_menu_state.items()):
++                if now - float(stale.get("created_at", now)) > 900:
++                    self._charline_menu_state.pop(stale_id, None)
++            state = self._charline_menu_state.get(menu_id)
++            message_id = str(getattr(query_message, "message_id", "") or "")
++            if not state:
++                await query.answer(text="This Charline menu expired. Run /charline again.")
++                return
++            if state.get("owner_user_id") and caller_id != state["owner_user_id"]:
++                await query.answer(text="You are not authorized to use this menu.")
++                return
++            if (
++                str(query_chat_id or "") != state.get("chat_id", "")
++                or str(query_thread_id or "") != state.get("thread_id", "")
++                or message_id != state.get("message_id", "")
++            ):
++                await query.answer(text="This Charline menu expired. Run /charline again.")
++                return
++
++            if action in {"home", "calendar", "mail", "files", "new"}:
++                try:
++                    text, keyboard = self._render_charline_panel(menu_id, action)
++                except ValueError:
++                    await query.answer(text="Invalid Charline action.")
++                    return
++                await query.edit_message_text(
++                    text=text,
++                    parse_mode=ParseMode.HTML,
++                    reply_markup=keyboard,
++                )
++                await query.answer()
++                return
++
++            if action not in {"tasks", "projects"}:
++                await query.answer(text="Invalid Charline action.")
++                return
++            callback = state.get("callback")
++            if not callable(callback):
++                await query.answer(text="This Charline menu expired. Run /charline again.")
++                return
++            await query.answer(text="Открываю…")
++            try:
++                result = await callback(action)
++            except Exception:
++                logger.exception("Telegram Charline-menu callback failed")
++                result = "Не удалось открыть раздел. Повторите /charline."
++            if result:
++                metadata = {}
++                if query_thread_id is not None:
++                    metadata["thread_id"] = str(query_thread_id)
++                await self.send(
++                    str(query_chat_id), str(result), metadata=metadata or None
++                )
++            return
++
 +        # --- Active-work stop menu callbacks (st:menu_id:index|all) ---
 +        if data.startswith("st:"):
 +            parts = data.split(":", 2)
@@ -1260,7 +1491,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
          # --- Model picker callbacks ---
          if data.startswith(("mp:", "mpg:", "mpv:", "mm:", "mc:", "mb", "mx", "mg:")):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -6464,7 +6728,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6464,7 +6913,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      await query.answer(text="⛔ You are not authorized to approve commands.")
                      return
  
@@ -1269,7 +1500,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
                  if not session_key:
                      await query.answer(text="This approval has already been resolved.")
                      return
-@@ -6479,7 +6743,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6479,7 +6928,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  # regression follow-up: 60s waits made stale taps common).
                  try:
                      from tools.approval import resolve_gateway_approval
@@ -1280,7 +1511,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
                      logger.info(
                          "Telegram button resolved %d approval(s) for session %s (choice=%s, user=%s)",
                          count, session_key, choice, user_display,
-@@ -6489,6 +6755,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6489,6 +6940,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      count = 0
  
                  if count:
@@ -1288,7 +1519,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
                      # Map choice to human-readable label
                      label_map = {
                          "once": "✅ Approved once",
-@@ -6648,6 +6915,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6648,6 +7100,10 @@ class TelegramAdapter(BasePlatformAdapter):
                  if not session_key:
                      await query.answer(text="This prompt has already been resolved.")
                      return
@@ -1299,7 +1530,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
  
                  user_display = getattr(query.from_user, "first_name", "User")
  
-@@ -6661,7 +6932,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6661,7 +7117,9 @@ class TelegramAdapter(BasePlatformAdapter):
                      flipped = False
                      try:
                          from tools.clarify_gateway import mark_awaiting_text
@@ -1310,7 +1541,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..2c0535c398f9352a6cf833d313c4e62d
                      except Exception as exc:
                          logger.warning("[%s] mark_awaiting_text failed: %s", self.name, exc)
  
-@@ -6712,7 +6985,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6712,7 +7170,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  self._clarify_state.pop(clarify_id, None)
                  try:
                      from tools.clarify_gateway import resolve_gateway_clarify
@@ -2080,6 +2311,360 @@ index 384932687023d934df99c5c6f20cf471536d7294..f5b6816a183e54307a122e6c0a623851
          parent.steer.assert_called_once_with("course-correct")
          parent.interrupt.assert_not_called()
 -
+diff --git a/tests/gateway/test_telegram_charline_menu.py b/tests/gateway/test_telegram_charline_menu.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c24c2900ab0ed2fabad1c506df9693e02a9c1a8
+--- /dev/null
++++ b/tests/gateway/test_telegram_charline_menu.py
+@@ -0,0 +1,348 @@
++import asyncio
++import os
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, MagicMock, patch
++
++from gateway.config import Platform, PlatformConfig
++from gateway.platforms.base import MessageEvent, SendResult
++from gateway.run import GatewayRunner
++from gateway.session import SessionSource
++from hermes_cli.commands import resolve_command, should_bypass_active_session
++from plugins.platforms.telegram.adapter import TelegramAdapter
++
++
++def _source(thread_id=None):
++    return SessionSource(
++        platform=Platform.TELEGRAM,
++        chat_id="42",
++        chat_type="dm",
++        user_id="7",
++        thread_id=thread_id,
++    )
++
++
++def _adapter():
++    adapter = TelegramAdapter(PlatformConfig(enabled=True, token="test-token"))
++    adapter._bot = AsyncMock()
++    adapter._bot.send_message = AsyncMock(return_value=MagicMock(message_id=99))
++    return adapter
++
++
++def _query(data, *, user_id="7", thread_id=None):
++    query = AsyncMock()
++    query.data = data
++    query.message = MagicMock(
++        chat_id=42,
++        text="Charline",
++        message_id=99,
++        message_thread_id=thread_id,
++    )
++    query.message.chat.type = "private"
++    query.from_user = MagicMock(id=user_id, first_name="Tester")
++    return query
++
++
++def _telegram_buttons():
++    return (
++        patch(
++            "plugins.platforms.telegram.adapter.InlineKeyboardButton",
++            side_effect=lambda text, callback_data: SimpleNamespace(
++                text=text, callback_data=callback_data
++            ),
++        ),
++        patch(
++            "plugins.platforms.telegram.adapter.InlineKeyboardMarkup",
++            side_effect=lambda rows: SimpleNamespace(inline_keyboard=rows),
++        ),
++    )
++
++
++def test_charline_command_is_native_and_available_while_busy():
++    command = resolve_command("charline")
++    assert command is not None
++    assert command.gateway_only is True
++    assert command.busy_policy == "dispatch"
++    assert should_bypass_active_session("charline") is True
++
++
++def test_charline_panel_renders_six_requested_buttons():
++    async def run():
++        adapter = _adapter()
++        button_patch, markup_patch = _telegram_buttons()
++        with button_patch, markup_patch:
++            result = await adapter.send_charline_menu(
++                chat_id="42",
++                session_key="telegram:dm:42",
++                owner_user_id="7",
++                on_action=AsyncMock(),
++            )
++
++        assert result.success
++        assert len(adapter._charline_menu_state) == 1
++        sent = adapter._bot.send_message.await_args.kwargs
++        labels = [
++            button.text
++            for row in sent["reply_markup"].inline_keyboard
++            for button in row
++        ]
++        assert labels == [
++            "Календарь",
++            "Почта",
++            "Файлы",
++            "Задачи",
++            "Проекты",
++            "Новая задача",
++        ]
++
++    asyncio.run(run())
++
++
++def test_charline_category_edits_same_card_and_back_restores_home():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock()
++        button_patch, markup_patch = _telegram_buttons()
++        with button_patch, markup_patch:
++            await adapter.send_charline_menu(
++                chat_id="42",
++                session_key="telegram:dm:42",
++                owner_user_id="7",
++                on_action=on_action,
++            )
++            menu_id = next(iter(adapter._charline_menu_state))
++            query = _query(f"ch:{menu_id}:calendar")
++            with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++                await adapter._handle_callback_query(
++                    MagicMock(callback_query=query), MagicMock()
++                )
++            detail = query.edit_message_text.await_args.kwargs
++            assert "Календарь" in detail["text"]
++            assert detail["reply_markup"].inline_keyboard[0][0].text == "Назад"
++
++            query.reset_mock()
++            query.data = f"ch:{menu_id}:home"
++            with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++                await adapter._handle_callback_query(
++                    MagicMock(callback_query=query), MagicMock()
++                )
++            home = query.edit_message_text.await_args.kwargs
++            labels = [
++                button.text
++                for row in home["reply_markup"].inline_keyboard
++                for button in row
++            ]
++            assert "Новая задача" in labels
++        on_action.assert_not_awaited()
++
++    asyncio.run(run())
++
++
++def test_charline_new_task_prompts_for_plain_language_without_starting_work():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock()
++        button_patch, markup_patch = _telegram_buttons()
++        with button_patch, markup_patch:
++            await adapter.send_charline_menu(
++                chat_id="42",
++                session_key="telegram:dm:42",
++                owner_user_id="7",
++                on_action=on_action,
++            )
++            menu_id = next(iter(adapter._charline_menu_state))
++            query = _query(f"ch:{menu_id}:new")
++            with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++                await adapter._handle_callback_query(
++                    MagicMock(callback_query=query), MagicMock()
++                )
++
++        assert "обычными словами" in query.edit_message_text.await_args.kwargs["text"]
++        on_action.assert_not_awaited()
++
++    asyncio.run(run())
++
++
++def test_charline_tasks_and_projects_reuse_runner_actions():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock(side_effect=[None, "## Проекты"])
++        adapter.send = AsyncMock()
++        await adapter.send_charline_menu(
++            chat_id="42",
++            session_key="telegram:dm:42:101",
++            owner_user_id="7",
++            on_action=on_action,
++            metadata={"thread_id": "101"},
++        )
++        menu_id = next(iter(adapter._charline_menu_state))
++
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=_query(f"ch:{menu_id}:tasks", thread_id=101)),
++                MagicMock(),
++            )
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=_query(f"ch:{menu_id}:projects", thread_id=101)),
++                MagicMock(),
++            )
++
++        assert [call.args[0] for call in on_action.await_args_list] == [
++            "tasks",
++            "projects",
++        ]
++        adapter.send.assert_awaited_once_with(
++            "42", "## Проекты", metadata={"thread_id": "101"}
++        )
++
++    asyncio.run(run())
++
++
++def test_charline_panel_is_bound_to_original_chat_and_topic():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock()
++        await adapter.send_charline_menu(
++            chat_id="42",
++            session_key="telegram:dm:42:101",
++            owner_user_id="7",
++            on_action=on_action,
++            metadata={"thread_id": "101"},
++        )
++        menu_id = next(iter(adapter._charline_menu_state))
++        query = _query(f"ch:{menu_id}:tasks", thread_id=202)
++
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=query), MagicMock()
++            )
++
++        on_action.assert_not_awaited()
++        assert "expired" in query.answer.await_args.kwargs["text"].lower()
++
++    asyncio.run(run())
++
++
++def test_charline_expired_panel_does_not_invoke_an_action():
++    async def run():
++        adapter = _adapter()
++        query = _query("ch:missing:tasks")
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=query), MagicMock()
++            )
++        assert "expired" in query.answer.await_args.kwargs["text"].lower()
++
++    asyncio.run(run())
++
++
++def test_charline_timed_out_panel_does_not_invoke_an_action():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock()
++        await adapter.send_charline_menu(
++            chat_id="42",
++            session_key="telegram:dm:42",
++            owner_user_id="7",
++            on_action=on_action,
++        )
++        menu_id = next(iter(adapter._charline_menu_state))
++        adapter._charline_menu_state[menu_id]["created_at"] -= 901
++        query = _query(f"ch:{menu_id}:tasks")
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=query), MagicMock()
++            )
++        on_action.assert_not_awaited()
++        assert "expired" in query.answer.await_args.kwargs["text"].lower()
++
++    asyncio.run(run())
++
++
++def test_charline_panel_rejects_another_authorized_user():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock()
++        await adapter.send_charline_menu(
++            chat_id="42",
++            session_key="telegram:dm:42",
++            owner_user_id="7",
++            on_action=on_action,
++        )
++        menu_id = next(iter(adapter._charline_menu_state))
++        query = _query(f"ch:{menu_id}:tasks", user_id="8")
++
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=query), MagicMock()
++            )
++
++        on_action.assert_not_awaited()
++        assert "not authorized" in query.answer.await_args.kwargs["text"].lower()
++
++    asyncio.run(run())
++
++
++def test_gateway_charline_actions_preserve_slash_acl():
++    class Adapter:
++        async def send_charline_menu(self, **kwargs):
++            self.action = kwargs["on_action"]
++            return SendResult(success=True, message_id="99")
++
++    async def run():
++        runner = object.__new__(GatewayRunner)
++        adapter = Adapter()
++        runner._adapter_for_source = lambda source: adapter
++        runner._session_key_for_source = lambda source: "telegram:dm:42"
++        runner._thread_metadata_for_source = lambda source, reply: None
++        runner._check_slash_access = lambda source, command: f"denied:{command}"
++        runner._handle_agents_command = AsyncMock()
++        runner._handle_projects_command = AsyncMock()
++        event = MessageEvent(text="/charline", source=_source(), message_id="m1")
++
++        assert await runner._handle_charline_command(event) is None
++        assert await adapter.action("tasks") == "denied:agents"
++        assert await adapter.action("projects") == "denied:projects"
++        runner._handle_agents_command.assert_not_awaited()
++        runner._handle_projects_command.assert_not_awaited()
++
++    asyncio.run(run())
++
++
++def test_gateway_charline_handler_binds_existing_task_and_project_handlers():
++    class Adapter:
++        def __init__(self):
++            self.kwargs = None
++
++        async def send_charline_menu(self, **kwargs):
++            self.kwargs = kwargs
++            return SendResult(success=True, message_id="99")
++
++    async def run():
++        runner = object.__new__(GatewayRunner)
++        adapter = Adapter()
++        runner._adapter_for_source = lambda source: adapter
++        runner._session_key_for_source = lambda source: "telegram:dm:42:101"
++        runner._thread_metadata_for_source = lambda source, reply: {
++            "thread_id": str(source.thread_id)
++        }
++        runner._check_slash_access = lambda source, command: None
++        runner._handle_agents_command = AsyncMock(return_value=None)
++        runner._handle_projects_command = AsyncMock(return_value="## Проекты")
++        event = MessageEvent(
++            text="/charline",
++            source=_source("101"),
++            message_id="m1",
++        )
++
++        result = await runner._handle_charline_command(event)
++
++        assert result is None
++        assert adapter.kwargs["owner_user_id"] == "7"
++        assert adapter.kwargs["metadata"] == {"thread_id": "101"}
++        action = adapter.kwargs["on_action"]
++        assert await action("tasks") is None
++        assert await action("projects") == "## Проекты"
++        runner._handle_agents_command.assert_awaited_once_with(event)
++        runner._handle_projects_command.assert_awaited_once_with(event)
++
++    asyncio.run(run())
 diff --git a/tests/gateway/test_telegram_clarify_buttons.py b/tests/gateway/test_telegram_clarify_buttons.py
 index 7d8bdbd0d69db7f9a2d1041caca9499b7c6bc190..b84654f6b7bfa7b3cd14470d1558264d67ebc799 100644
 --- a/tests/gateway/test_telegram_clarify_buttons.py
