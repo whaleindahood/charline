@@ -40,7 +40,11 @@ def summarize_usage(
     active_subagents: int,
     budget: UsageBudget,
 ) -> dict[str, object]:
-    if isinstance(active_subagents, bool) or active_subagents < 0:
+    if (
+        isinstance(active_subagents, bool)
+        or not isinstance(active_subagents, int)
+        or active_subagents < 0
+    ):
         raise ValueError("active_subagents must be a non-negative integer")
     totals = {name: 0 for name in COUNTERS}
     by_source: defaultdict[str, dict[str, int]] = defaultdict(

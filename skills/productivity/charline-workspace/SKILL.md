@@ -41,8 +41,8 @@ Before any send/create/update/append/share/delete:
 
 1. Build an exact preview with service, account, target IDs, recipients, content and effect.
 2. Prefer reversible operations such as Drive trash over permanent deletion.
-3. Ask for explicit confirmation.
-4. Execute exactly once.
+3. Send the exact preview, then invoke the official `google_api.py` mutation and wait for Hermes native terminal approval (`Once / Deny`).
+4. Execute the approved command exactly once; Smart, session and permanent approvals never authorize Workspace writes.
 5. Read back or fetch the returned resource by ID.
 6. Compare critical fields with the preview before reporting success.
 

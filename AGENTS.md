@@ -19,6 +19,7 @@
 
 ## Engineering
 
+- Use Ponytail `full` for coding sessions and run `ponytail-review` before handoff.
 - Use strict RED-GREEN-REFACTOR for behavior changes.
 - Keep the project as a standalone Git repository.
 - Run focused tests, then the full suite.

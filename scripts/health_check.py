@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable, Sequence
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.sync_skills import default_hermes_home, is_managed_skill_name
 
 Runner = Callable[[Sequence[str]], tuple[int, str]]
 WINDOWS_LAUNCH_FAILURE_CODES = {3221225477, -1073741819}
@@ -74,6 +80,14 @@ def _run_check(runner: Runner, command: Sequence[str]) -> tuple[int, str]:
         return 1, f"{type(error).__name__}: {error}"
 
 
+def _is_managed_skill(path: Path) -> bool:
+    return (
+        is_managed_skill_name(path.name)
+        and path.is_dir()
+        and (path / "SKILL.md").is_file()
+    )
+
+
 def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = default_runner) -> dict:
     project_root = Path(project_root)
     hermes_home = Path(hermes_home)
@@ -81,8 +95,9 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
     destination_root = hermes_home / "skills" / "productivity"
 
     source_skills = sorted(
-        path for path in source_root.glob("charline-*")
-        if path.is_dir() and (path / "SKILL.md").is_file()
+        path
+        for path in (source_root.iterdir() if source_root.is_dir() else ())
+        if _is_managed_skill(path)
     )
     mismatched = []
     for source in source_skills:
@@ -92,8 +107,8 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
     source_names = {source.name for source in source_skills}
     active_names = {
         path.name
-        for path in destination_root.glob("charline-*")
-        if path.is_dir() and (path / "SKILL.md").is_file()
+        for path in (destination_root.iterdir() if destination_root.is_dir() else ())
+        if _is_managed_skill(path)
     }
     extra = sorted(active_names - source_names)
 
@@ -126,19 +141,8 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
     }
 
 
-def default_hermes_home() -> Path:
-    configured = os.environ.get("HERMES_HOME")
-    if configured:
-        return Path(configured)
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
-        return Path(local_app_data) / "hermes"
-    return Path.home() / ".hermes"
-
-
 def main() -> int:
-    project_root = Path(__file__).resolve().parents[1]
-    result = collect_health(project_root=project_root, hermes_home=default_hermes_home())
+    result = collect_health(project_root=PROJECT_ROOT, hermes_home=default_hermes_home())
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "consistent" else 1
 

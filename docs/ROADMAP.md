@@ -16,6 +16,7 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 | 3. Research | Complete | Browser provider available; optional structured web provider is not configured |
 | 4. Briefing/reminders | Complete | Confirmed cron create/read-back/run, user-observed delivery and separately confirmed cleanup passed |
 | 5. Developer/usage | Complete | Deployment remains separately confirmed |
+| 6. Native conversational UX | Complete | Rich tables/drafts active; `/projects`, recent task results and labelled confirmation buttons require final live proof |
 
 ## Phase 0 — Foundation
 
@@ -23,7 +24,7 @@ Exit criteria: standalone recoverable Git history; manifest-backed skill sync/re
 
 ## Phase 1 — Calendar vertical slice
 
-Exit criteria: agenda/availability policy; deterministic timezone, conflict, buffer and slot planning; exact preview and immutable confirmation hash; unknown-outcome reconciliation; read-back contract; eval coverage.
+Exit criteria: agenda/availability policy; deterministic timezone, conflict, buffer and slot planning; exact preview and once-only approval of the immutable `google_api.py` command; unknown-outcome reconciliation; read-back contract; eval coverage.
 
 Installed Google interface limitation: Calendar supports list/create/delete, but not get-by-ID, update or free/busy. Update requests remain drafts. Create verification uses a narrow list and returned event ID.
 
@@ -45,10 +46,16 @@ Exit criteria: deterministic partial-failure brief; conflict/overdue detection; 
 
 Exit criteria: RED–GREEN–REFACTOR workflow; architecture guard against a second runtime/service SDKs; focused/full test gates; separate usage counters and budgets; bounded delegation; release and evidence procedures.
 
+## Phase 6 — Native conversational UX
+
+Goal: make the existing Hermes chat the complete assistant interface. Natural language and voice must reach the same domain skills without a second router, session system or Mini App.
+
+Exit criteria: `/charline` is visible in the Telegram menu; ordinary text and Russian voice scheduling request only missing blocking details, then silently check availability in one initial Calendar read before one confirmation preview; conflicts return the nearest available alternative; changed drafts invalidate prior confirmation; confirmed writes are read back; `/topic` and `/background` demonstrate independent work without blocking the main chat; `/projects` lists isolated topic projects; `/tasks` (`/agents`) edits one current-chat task card in place with refresh, `needs input`, recent results and scoped stop controls while hiding Gateway service jobs; compact Markdown tables use Telegram Rich Messages; Workspace confirmation uses once-only native terminal approval for the exact `google_api.py` write command; natural-language cancellation and `/stop` provide scoped task controls; the live checks in `ACCEPTANCE.md` pass and receive new evidence.
+
 ## Post-V1, opt-in only
 
 - Additional services through narrow least-privileged skills.
-- Durable multi-worker Kanban only after a proven need.
+- Durable multi-worker Kanban only when several workers share dependencies and their task state must survive Gateway/worker restarts; ordinary parallel requests and separate project chats do not qualify.
 - Mini App, tunnel, reverse proxy or custom web client.
 
 Permanently excluded: a second agent runtime, scheduler, memory store, session system, delegation engine, universal router or autonomous unconfirmed external writes.

@@ -44,7 +44,7 @@ Initial V1 capabilities:
 
 ## Interfaces
 
-Telegram is the primary daily interface. Hermes Desktop/Dashboard is the operational console. Mini Apps are excluded from V1 and cannot become a critical path.
+Telegram is the primary daily interface. Ordinary direct-message conversation is the default. Natural-language background requests or `/background` run bounded work while the chat stays responsive; `/tasks` (`/agents`) opens one editable current-chat task card with active states, `needs input`, recent delegation results, refresh and scoped stop controls while hiding Gateway service jobs. Natural-language cancellation works during an active turn; `/stop` provides per-task and stop-all controls. Native `/goal` owns one steerable multi-turn outcome. `/topic` is opt-in: one Telegram topic becomes one independent project session and the root direct message becomes the lobby only after opt-in; `/projects` lists those owned topic projects and their active-work counts. Rich Messages render compact Markdown tables in ordinary answers; Rich Drafts provide provisional streaming only. Workspace writes use a Rich Message preview followed by Hermes native once-only terminal approval for the exact blocked `google_api.py` command. Hermes Desktop/Dashboard is the expanded operational console. Mini Apps are excluded from V1 and cannot become a critical path.
 
 ## Deployment
 

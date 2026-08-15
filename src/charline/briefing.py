@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from datetime import datetime
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
@@ -92,7 +93,18 @@ def _normalize_item(
             raise BriefingValidationError(f"calendar.items[{item_index}] end must be after start")
     elif section_name == "research":
         url = item.get("url")
-        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+        try:
+            parsed_url = urlparse(url) if isinstance(url, str) else None
+            hostname = parsed_url.hostname if parsed_url is not None else None
+        except ValueError:
+            parsed_url = None
+            hostname = None
+        if (
+            parsed_url is None
+            or parsed_url.scheme not in {"http", "https"}
+            or not hostname
+            or any(character.isspace() for character in hostname)
+        ):
             raise BriefingValidationError(f"research.items[{item_index}].url must be an HTTP URL")
     elif section_name == "reminders" and "due" in item:
         if not isinstance(item.get("done", False), bool):

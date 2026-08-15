@@ -4,7 +4,9 @@ Charline is a Hermes-native general personal assistant configuration, not a seco
 
 ## Current status
 
-V1 is production-verified: the repository surface, active Hermes profile, authenticated reads, Telegram round trip and confirmed sandbox effects have passed their evidence-based release gates. Future external writes still require a fresh exact preview and explicit confirmation.
+V1 repository surface is implemented, including Phase 6 conversational UX behavior. The 2026-08-07 production evidence is historical; fresh text, voice, menu and parallel-work evidence is still required before calling the current profile production-verified. Future external writes still require a fresh exact preview and explicit confirmation.
+
+Repository completion and deployment to the active profile remain separate, reviewable operations even after production verification.
 
 ## Product contract
 
@@ -28,6 +30,7 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for scope and [`docs/ACCEPTANCE.md`](do
 ## Development
 
 ```powershell
+uv sync --group dev
 python -m pytest -q
 python scripts/run_evals.py
 ```

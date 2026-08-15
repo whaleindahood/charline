@@ -11,6 +11,17 @@ from scripts.usage_report import collect_usage
 
 
 class UsagePolicyTests(unittest.TestCase):
+    def test_budget_docs_do_not_promise_a_nonexistent_delegation_queue(self):
+        text = (
+            Path(__file__).resolve().parents[1] / "docs" / "USAGE_BUDGETS.md"
+        ).read_text(encoding="utf-8").lower()
+        self.assertNotIn("queue work", text)
+        self.assertIn("wait for one active worker to finish", text)
+
+    def test_active_subagents_must_be_an_integer(self):
+        with self.assertRaisesRegex(ValueError, "active_subagents"):
+            summarize_usage([], active_subagents="2", budget=UsageBudget())
+
     def test_flags_large_context_and_excess_parallel_subagents(self):
         rows = [
             {

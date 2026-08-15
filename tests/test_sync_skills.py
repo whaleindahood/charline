@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.sync_skills import plan_sync, sync_skills
+from scripts.sync_skills import is_managed_skill_name, plan_sync, sync_skills
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +54,25 @@ class SyncSkillsTests(unittest.TestCase):
                 before,
             )
 
+    def test_exact_charline_entrypoint_is_managed_with_namespaced_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source_root = base / "source"
+            self.make_skill(source_root, "charline", "name: charline\n")
+            self.make_skill(source_root, "charline-calendar", "name: charline-calendar\n")
+            self.make_skill(source_root, "unrelated", "name: unrelated\n")
+
+            result = plan_sync(
+                source_root=source_root,
+                hermes_home=base / "hermes",
+                backup_root=base / "backup",
+            )
+
+            self.assertEqual(
+                [item["name"] for item in result["skills"]],
+                ["charline", "charline-calendar"],
+            )
+
     def test_installs_all_managed_skills_and_backs_up_existing_skill(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -65,8 +84,8 @@ class SyncSkillsTests(unittest.TestCase):
             installed = sync_skills(source_root=ROOT / "skills" / "productivity", hermes_home=hermes_home, backup_root=backup)
             expected = {
                 path.name
-                for path in (ROOT / "skills" / "productivity").glob("charline-*")
-                if (path / "SKILL.md").is_file()
+                for path in (ROOT / "skills" / "productivity").iterdir()
+                if is_managed_skill_name(path.name) and (path / "SKILL.md").is_file()
             }
             self.assertEqual(set(installed), expected)
             self.assertIn("charline-orchestration", installed)

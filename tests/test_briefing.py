@@ -97,6 +97,36 @@ class DailyBriefingTests(unittest.TestCase):
         with self.assertRaisesRegex(BriefingValidationError, "research.*url"):
             compose_daily_brief(snapshot)
 
+    def test_research_item_requires_absolute_url_with_host(self):
+        snapshot = self.base_snapshot()
+        snapshot["sections"] = [
+            {
+                "name": "research",
+                "status": "ok",
+                "observed_at": "2026-08-07T08:58:00+03:00",
+                "items": [{"handle": "finding-1", "title": "Claim", "url": "http://"}],
+            }
+        ]
+        with self.assertRaisesRegex(BriefingValidationError, "research.*url"):
+            compose_daily_brief(snapshot)
+
+    def test_research_item_rejects_malformed_or_whitespace_host(self):
+        for url in ("http://[", "https://bad host/path"):
+            with self.subTest(url=url):
+                snapshot = self.base_snapshot()
+                snapshot["sections"] = [
+                    {
+                        "name": "research",
+                        "status": "ok",
+                        "observed_at": "2026-08-07T08:58:00+03:00",
+                        "items": [
+                            {"handle": "finding-1", "title": "Claim", "url": url}
+                        ],
+                    }
+                ]
+                with self.assertRaisesRegex(BriefingValidationError, "research.*url"):
+                    compose_daily_brief(snapshot)
+
     def test_rejects_naive_timestamps(self):
         snapshot = self.base_snapshot()
         snapshot["generated_at"] = "2026-08-07T09:00:00"

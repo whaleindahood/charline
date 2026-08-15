@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, Sequence
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.sync_skills import default_hermes_home
 
 
 CommandRunner = Callable[[Sequence[str]], tuple[int, str]]
@@ -25,16 +29,6 @@ SUPPORTED_HERMES_VERSIONS = (
     "Hermes Agent v0.19.0",
     "Hermes Agent v0.20.0",
 )
-
-
-def default_hermes_home() -> Path:
-    configured = os.environ.get("HERMES_HOME")
-    if configured:
-        return Path(configured)
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
-        return Path(local_app_data) / "hermes"
-    return Path.home() / ".hermes"
 
 
 def _is_transient_windows_launch_failure(completed: subprocess.CompletedProcess[str]) -> bool:

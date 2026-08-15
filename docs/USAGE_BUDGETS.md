@@ -17,4 +17,4 @@ These thresholds are operational warnings, not provider quota calculations. Fres
 
 ## Response
 
-When a threshold is reached: finish the current safe atomic step, record durable facts/artifacts, start a fresh session, and do not copy unrelated conversation history. When delegation cap is reached, queue work instead of launching another worker.
+When a threshold is reached: finish the current safe atomic step, record durable facts/artifacts, start a fresh session, and do not copy unrelated conversation history. When delegation cap is reached, wait for one active worker to finish before launching another. Use Hermes Kanban only when pending work must survive a restart.

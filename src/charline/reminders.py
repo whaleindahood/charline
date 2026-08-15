@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from croniter import croniter
+
 
 class ReminderError(ValueError):
     """Raised when a reminder draft is incomplete or unsafe to schedule."""
@@ -50,8 +52,8 @@ def build_reminder_draft(
         if trigger.astimezone(timezone.utc) <= now.astimezone(timezone.utc):
             raise ReminderError("once schedule must be in the future")
     elif schedule_type == "cron":
-        if len(schedule.split()) != 5:
-            raise ReminderError("cron schedule must contain five fields")
+        if len(schedule.split()) != 5 or not croniter.is_valid(schedule):
+            raise ReminderError("cron expression must contain five fields with valid values")
     else:
         raise ReminderError("schedule_type must be once or cron")
 
@@ -84,4 +86,3 @@ def build_reminder_draft(
             f"{destination}: {message}"
         ),
     }
-

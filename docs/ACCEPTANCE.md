@@ -53,6 +53,20 @@ Each item gets its own concrete preview and confirmation; use non-production tar
 
 Do not use Drive share/delete as a V1 proof until the installed interface exposes sufficient permission/trash read-back.
 
+## Conversational UX gates
+
+Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
+
+1. Confirm `/charline` is visible and returns a concise Russian capability menu.
+2. Send a natural-language meeting request without duration; receive one short duration question, then no progress chatter and one complete preview; cancel without a write.
+3. Repeat the request by Russian voice; verify the transcript and cancel at the final confirmation.
+4. Request a busy slot; receive one conflict message with the nearest available start as an exact alternative preview.
+5. Change one field after preview; verify the old confirmation is invalid and a new preview is required.
+6. Separately confirm one sandbox Calendar creation; receive one concise result after exact read-back.
+7. In the ordinary direct-message chat, start two independent bounded tasks in parallel; continue the conversation, inspect only current-chat work through `/agents` with no Gateway service jobs shown, and verify each completion is labelled and separately verified.
+8. Opt into `/topic` separately; verify the root direct message becomes the topic lobby and two topic conversations remain isolated.
+9. Ask one unrelated general question and verify Charline answers normally without forcing a menu or domain transaction.
+
 ## Release decision
 
 - `repository-complete`: automated gates pass and docs match the installed interface.

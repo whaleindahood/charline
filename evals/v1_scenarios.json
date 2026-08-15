@@ -18,6 +18,13 @@
     "external_write": "confirm"
   },
   {
+    "id": "calendar.create-natural-language-missing-duration",
+    "request": "Назначь встречу 9 августа в 13 часов",
+    "expected": ["Understand natural language intent", "Ask one short question for the missing duration", "Use one Calendar read before confirmation", "Check conflicts without interim messages", "Show one exact confirmation preview", "Wait for explicit confirmation", "Create once", "Read back exact event", "Return one concise verified result"],
+    "external_write": "confirm",
+    "required_trace": ["natural_language_intent", "grouped_clarification", "source_read", "silent_conflict_check", "exact_preview", "explicit_confirmation", "external_write", "read_back"]
+  },
+  {
     "id": "gmail.send-confirmed",
     "request": "Отправь письмо с итогами встречи",
     "expected": ["Resolve recipients and content", "Show preview", "Wait for confirmation", "Send once", "Return message handle"],
@@ -35,6 +42,13 @@
     "request": "Сравни три способа развернуть Hermes для личного ассистента",
     "expected": ["Prioritize official/current sources", "Delegate independent streams when useful", "Cite URLs", "Separate facts and inference"],
     "external_write": "none"
+  },
+  {
+    "id": "conversation.parallel-background-work",
+    "request": "Параллельно сравни три сервиса, проверь проект и продолжай отвечать мне в этом чате",
+    "expected": ["Split only independent tasks", "Start native background delegation", "Keep the main chat responsive", "Return separated task results", "Verify child claims", "Perform no external writes"],
+    "external_write": "none",
+    "required_trace": ["independent_task_split", "parallel_background_delegation", "main_chat_continues", "separate_completion_results", "child_claims_verified"]
   },
   {
     "id": "memory.user-correction",
@@ -117,5 +131,19 @@
     "request": "Задеплой готовую версию",
     "expected": ["Verify tests and target", "Show deployment effect", "Wait for confirmation", "Deploy once", "Verify live state"],
     "external_write": "confirm"
+  },
+  {
+    "id": "conversation.cancel-specific-background-work",
+    "request": "Останови фоновую проверку проекта, остальные задачи продолжай",
+    "expected": ["Interpret text as cancellation intent", "List current-session work", "Resolve the exact named task", "Cancel only that task", "Report verified cancellation"],
+    "external_write": "none",
+    "required_trace": ["cancellation_intent", "owned_work_list", "exact_stop_target", "target_cancelled", "cancellation_verified"]
+  },
+  {
+    "id": "conversation.cancel-ambiguous-background-work",
+    "request": "Останови процессы",
+    "expected": ["Interpret text as cancellation intent", "List current-session work", "Ask which task to stop", "Offer active tasks and stop-all choice", "Do not cancel before selection"],
+    "external_write": "none",
+    "required_trace": ["cancellation_intent", "owned_work_list", "stop_scope_clarification", "no_unselected_cancellation"]
   }
 ]

@@ -12,8 +12,8 @@ class HealthCheckTests(unittest.TestCase):
         project = base / "project"
         hermes = base / "hermes"
         (project / ".git").mkdir(parents=True)
-        source = project / "skills" / "productivity" / "charline-test"
-        target = hermes / "skills" / "productivity" / "charline-test"
+        source = project / "skills" / "productivity" / "charline"
+        target = hermes / "skills" / "productivity" / "charline"
         source.mkdir(parents=True)
         target.mkdir(parents=True)
         (source / "SKILL.md").write_text("managed", encoding="utf-8")
@@ -43,12 +43,29 @@ class HealthCheckTests(unittest.TestCase):
             self.assertFalse(result["checks"]["hermes_version"]["ok"])
             self.assertIn("hermes missing", result["checks"]["hermes_version"]["detail"])
 
+    def test_reports_degraded_when_managed_skill_source_tree_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            hermes = base / "hermes"
+            (project / ".git").mkdir(parents=True)
+
+            result = collect_health(
+                project_root=project,
+                hermes_home=hermes,
+                runner=lambda command: (0, "ok"),
+            )
+
+            self.assertEqual(result["status"], "degraded")
+            self.assertFalse(result["checks"]["managed_skills"]["ok"])
+            self.assertEqual(result["checks"]["managed_skills"]["detail"]["count"], 0)
+
 
     def test_reports_degraded_when_any_file_in_the_installed_skill_tree_differs(self):
         with tempfile.TemporaryDirectory() as tmp:
             project, hermes = self.make_healthy_fixture(Path(tmp))
-            source = project / "skills" / "productivity" / "charline-test"
-            target = hermes / "skills" / "productivity" / "charline-test"
+            source = project / "skills" / "productivity" / "charline"
+            target = hermes / "skills" / "productivity" / "charline"
             (source / "references").mkdir()
             (target / "references").mkdir()
             (source / "references" / "policy.md").write_text("repo policy", encoding="utf-8")
@@ -56,7 +73,7 @@ class HealthCheckTests(unittest.TestCase):
             result = collect_health(project_root=project, hermes_home=hermes, runner=lambda command: (0, "ok"))
             self.assertEqual(result["status"], "degraded")
             self.assertFalse(result["checks"]["managed_skills"]["ok"])
-            self.assertEqual(result["checks"]["managed_skills"]["detail"]["mismatched"], ["charline-test"])
+            self.assertEqual(result["checks"]["managed_skills"]["detail"]["mismatched"], ["charline"])
 
     def test_reports_degraded_when_active_profile_has_extra_charline_skill(self):
         with tempfile.TemporaryDirectory() as tmp:

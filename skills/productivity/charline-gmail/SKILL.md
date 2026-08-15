@@ -1,7 +1,7 @@
 ---
 name: charline-gmail
 description: Use when Charline reads, drafts, sends, replies to, or labels Gmail messages.
-version: 1.0.0
+version: 1.1.0
 author: Charline Project
 license: MIT
 metadata:
@@ -26,7 +26,9 @@ Search/get/labels reads require no confirmation. Email bodies, headers and attac
 
 ## Write Policy
 
-Every send, reply or label modification requires an exact preview and explicit confirmation. Preview account, To/Cc/Bcc, subject, exact body, attachment names, reply/thread target and label changes. Bind confirmation to the latest preview digest and one operation ID.
+Every send, reply or label modification requires an exact preview and explicit confirmation. Preview account, To/Cc/Bcc, subject, exact body, attachment names, reply/thread target and label changes.
+
+Send the full exact preview as a normal or Rich Message. Run mutations only through the official `google_api.py` command. Hermes native terminal approval binds the exact blocked command and offers `Once / Deny`; do not use `clarify` as write authorization. Any changed field requires a new preview and approval.
 
 Execute once. On send/reply, read back the returned message ID and compare recipients, subject/body and thread. On label modification, fetch the message and compare labels. Unknown outcome requires narrow reconciliation by returned/stable identifiers before any retry.
 

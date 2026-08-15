@@ -47,6 +47,18 @@ def test_cron_requires_five_fields_and_valid_timezone():
             destination="main",
             now=NOW,
         )
+
+
+def test_cron_rejects_out_of_range_expression():
+    with pytest.raises(ReminderError, match="cron expression"):
+        build_reminder_draft(
+            message="Brief",
+            schedule="99 99 99 99 99",
+            schedule_type="cron",
+            timezone_name="Europe/Moscow",
+            destination="main",
+            now=NOW,
+        )
     with pytest.raises(ReminderError, match="timezone"):
         build_reminder_draft(
             message="Brief",
@@ -56,4 +68,3 @@ def test_cron_requires_five_fields_and_valid_timezone():
             destination="main",
             now=NOW,
         )
-

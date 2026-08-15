@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-14T10:40:19.5177952Z",
+  "repository_commit": "03d9493212c48b600f5b11ef8ba699dccb926fa6",
+  "working_tree_dirty": true,
+  "status": "phase6-runtime-ready",
+  "skill_sync": {
+    "managed_skill_count": 13,
+    "mismatched": [],
+    "active_extras": [],
+    "health_status": "consistent",
+    "backup_manifest": "backups/20260814-phase6-profile-sync/manifest.json",
+    "backup_created_at": "2026-08-14T10:37:30.753274+00:00"
+  },
+  "telegram_display": {
+    "tool_progress": false,
+    "interim_assistant_messages": false,
+    "busy_ack_detail": false,
+    "long_running_notifications": true
+  },
+  "gateway": {
+    "running": true,
+    "process_count": 1,
+    "telegram_polling_connected": true,
+    "menu_registration_succeeded": true
+  },
+  "live_gates": {
+    "telegram_round_trip": false,
+    "charline_menu": false,
+    "voice": false,
+    "parallel_background_work": false,
+    "topic_isolation": false,
+    "google_authenticated_read": false
+  },
+  "external_workspace_writes": 0,
+  "contains_secrets": false
+}

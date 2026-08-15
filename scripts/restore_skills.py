@@ -18,6 +18,7 @@ from scripts.sync_skills import (
     _reject_links,
     _tree_hashes,
     default_hermes_home,
+    is_managed_skill_name,
 )
 
 
@@ -44,7 +45,7 @@ def _load_manifest(backup_root: Path) -> list[dict[str, object]]:
         files = entry.get("files")
         if (
             not isinstance(name, str)
-            or not name.startswith("charline-")
+            or not is_managed_skill_name(name)
             or name in names
             or not isinstance(existed, bool)
             or not isinstance(files, dict)

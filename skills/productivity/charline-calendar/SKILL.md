@@ -1,7 +1,7 @@
 ---
 name: charline-calendar
 description: Use when Charline handles calendars or scheduling.
-version: 2.0.0
+version: 2.1.0
 author: Charline Project
 license: MIT
 metadata:
@@ -22,9 +22,23 @@ Use for agenda questions, availability, event drafts, creation, deletion and age
 
 ## Time Contract
 
-Resolve timezone-aware start and end values, calendar, title, attendees, location, recurrence scope and notifications. Use the confirmed profile timezone (`Europe/Moscow` for the current user) unless the user explicitly supplies another timezone. Clarify genuinely ambiguous dates or durations.
+Resolve timezone-aware start and end values, calendar, title, attendees, location, recurrence scope and notifications. Use the confirmed profile timezone (`Europe/Moscow` for the current user) unless the user explicitly supplies another timezone. Clarify genuinely ambiguous dates or start times.
 
 For current-day availability, begin no earlier than the actual current time in calendar timezone. Past days have no free slots. Apply configured work windows and buffers, merge busy intervals, and offer at most three ranked options unless more are requested.
+
+## Conversational Input
+
+Accept scheduling intent in natural language or from a Hermes voice transcript; commands and buttons are optional shortcuts. Resolve explicit details first, then apply only preferences already stored as stable Hermes Memory, such as timezone, default calendar, work windows and buffers. Never promote a one-off draft value into a durable preference.
+
+An unambiguous start and duration or end is required from the user. Never invent event duration. Derive a useful title from the request; when none is available, use the disclosed neutral title `Встреча`. Calendar, attendees, location, description, recurrence and notifications are optional unless the request makes one material.
+
+When duration/end or another blocking detail is missing, ask one short clarification covering all blocking details. Do not interrogate the user about omitted optional fields. Use Hermes `clarify` for bounded choices and accept ordinary text answers; do not create another slot engine or draft store.
+
+After blocking details are known, use one Calendar read covering the requested interval and check conflicts before asking for confirmation. Do not split the initial availability check across repeated reads. Do not send interim commentary, source-read notices or progress messages. If the slot is free, send one compact confirmation message with full date including year, start and end, timezone, title, calendar and every material attendee/location/recurrence/notification value.
+
+If the slot conflicts, send one message that names the conflict and presents the nearest available start as a complete alternative preview. Offer `Create nearest / Other times / Cancel`; choosing Create nearest explicitly confirms that exact alternative. Return at most three alternatives only when the user asks for other times.
+
+Send the full exact preview as a normal or Rich Message. Run create/delete only through the official `google_api.py` command. Hermes native terminal approval binds the exact blocked command and offers `Once / Deny`; do not use `clarify` as write authorization. A changed field requires a new preview and approval. A voice-originated request still requires an unambiguous final approval; an uncertain transcript alone never authorizes a write.
 
 ## Read Operations
 
@@ -42,7 +56,7 @@ For availability, normalize source events according to `references/planner-contr
 6. Recheck conflicts immediately before writing.
 7. Execute one idempotent write.
 8. Read the event back using a narrow list window, match the returned ID and compare critical fields.
-9. Report verified result and link.
+9. Send one concise verified result and link. Do not narrate intermediate steps.
 
 A changed or superseded draft requires a new preview and confirmation. For recurring updates/deletes, explicitly resolve one occurrence, this-and-following, or the entire series. Deletes require strengthened confirmation and absence/deleted-state verification.
 

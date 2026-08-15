@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import stat
 from datetime import datetime, timezone
@@ -13,6 +14,12 @@ from pathlib import Path
 
 
 COPY_IGNORE = shutil.ignore_patterns(".hermes-tmp.*", "__pycache__", "*.pyc")
+
+
+def is_managed_skill_name(name: str) -> bool:
+    """Return whether a directory belongs to the versioned Charline surface."""
+
+    return re.fullmatch(r"charline(?:-[a-z0-9]+)*", name) is not None
 
 
 def _paths_overlap(left: Path, right: Path) -> bool:
@@ -71,7 +78,7 @@ def _managed_sources(source_root: Path) -> list[Path]:
         path
         for path in sorted(source_root.iterdir(), key=lambda path: path.name)
         if path.is_dir()
-        and path.name.startswith("charline-")
+        and is_managed_skill_name(path.name)
         and (path / "SKILL.md").is_file()
     ]
     if not sources:
@@ -122,8 +129,8 @@ def plan_sync(*, source_root: Path, hermes_home: Path, backup_root: Path) -> dic
     source_names = {source.name for source in sources}
     active_names = {
         path.name
-        for path in destination_root.glob("charline-*")
-        if path.is_dir() and (path / "SKILL.md").is_file()
+        for path in (destination_root.iterdir() if destination_root.is_dir() else ())
+        if is_managed_skill_name(path.name) and path.is_dir() and (path / "SKILL.md").is_file()
     }
     return {
         "schema_version": 1,

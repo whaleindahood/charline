@@ -2,9 +2,11 @@
   "conversation.casual-no-write": ["conversation_response"],
   "calendar.read-agenda": ["source_read"],
   "calendar.create-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"],
+  "calendar.create-natural-language-missing-duration": ["natural_language_intent", "grouped_clarification", "source_read", "silent_conflict_check", "exact_preview", "explicit_confirmation", "external_write", "read_back"],
   "gmail.send-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"],
   "drive.share-draft": ["verification_capability_check", "unsupported_write_blocked"],
   "research.multi-source": ["source_read", "source_verification"],
+  "conversation.parallel-background-work": ["independent_task_split", "parallel_background_delegation", "main_chat_continues", "separate_completion_results", "child_claims_verified"],
   "memory.user-correction": ["memory_replace"],
   "cron.reminder-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"],
   "briefing.partial-source-failure": ["source_read", "partial_failure_report"],
@@ -17,5 +19,7 @@
   "docs.append-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"],
   "sheets.update-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"],
   "cross-service.gmail-to-calendar": ["gmail_source_read", "calendar_exact_preview", "exact_preview", "calendar_confirmation", "explicit_confirmation", "external_write", "read_back"],
-  "developer.deploy-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"]
+  "developer.deploy-confirmed": ["exact_preview", "explicit_confirmation", "external_write", "read_back"],
+  "conversation.cancel-specific-background-work": ["cancellation_intent", "owned_work_list", "exact_stop_target", "target_cancelled", "cancellation_verified"],
+  "conversation.cancel-ambiguous-background-work": ["cancellation_intent", "owned_work_list", "stop_scope_clarification", "no_unselected_cancellation"]
 }

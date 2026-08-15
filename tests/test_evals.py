@@ -82,6 +82,29 @@ class EvaluationContractTests(unittest.TestCase):
         for capability in ("calendar", "gmail", "drive", "research", "briefing"):
             self.assertIn(capability, roadmap)
 
+    def test_roadmap_tracks_native_conversational_ux_phase(self):
+        roadmap = (ROOT / "docs" / "ROADMAP.md").read_text(encoding="utf-8").lower()
+        acceptance = (ROOT / "docs" / "ACCEPTANCE.md").read_text(encoding="utf-8").lower()
+        self.assertIn("phase 6", roadmap)
+        self.assertIn("natural language and voice", roadmap)
+        self.assertIn("conversational ux gates", acceptance)
+        self.assertIn("/charline", acceptance)
+
+    def test_parallel_conversation_scenario_is_covered(self):
+        scenarios = json.loads((ROOT / "evals" / "v1_scenarios.json").read_text(encoding="utf-8"))
+        scenario = next(item for item in scenarios if item["id"] == "conversation.parallel-background-work")
+        self.assertEqual(scenario["external_write"], "none")
+        self.assertEqual(
+            scenario["required_trace"],
+            [
+                "independent_task_split",
+                "parallel_background_delegation",
+                "main_chat_continues",
+                "separate_completion_results",
+                "child_claims_verified",
+            ],
+        )
+
     def test_security_policy_defines_external_content_trust_boundary(self):
         policy_paths = [
             ROOT / "docs" / "SECURITY.md",
@@ -94,6 +117,26 @@ class EvaluationContractTests(unittest.TestCase):
             self.assertIn("embedded directives", text, path)
             self.assertIn("secrets", text, path)
             self.assertIn("context", text, path)
+
+    def test_natural_language_calendar_fixture_requests_missing_duration(self):
+        scenario = next(
+            item
+            for item in self.scenarios
+            if item["id"] == "calendar.create-natural-language-missing-duration"
+        )
+        self.assertEqual(
+            set(scenario["required_trace"]),
+            {
+                "natural_language_intent",
+                "grouped_clarification",
+                "source_read",
+                "silent_conflict_check",
+                "exact_preview",
+                "explicit_confirmation",
+                "external_write",
+                "read_back",
+            },
+        )
 
     def test_gitignore_excludes_local_state_and_secret_material(self):
         patterns = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
