@@ -1,3 +1,47 @@
+diff --git a/agent/transports/codex.py b/agent/transports/codex.py
+index a60e5291b5b5f0915270e43cc3637f2c0f65ff22..6ff302488f2987b29ec00a268d1b0636df209086 100644
+--- a/agent/transports/codex.py
++++ b/agent/transports/codex.py
+@@ -53,6 +53,17 @@ def _bounded_prompt_cache_key(value: Any) -> Optional[str]:
+ _XAI_CLIENT_WEB_SEARCH_ALIAS = "hermes_web_search"
+ 
+ 
++def _codex_prefers_native_web_search() -> bool:
++    """Use Codex native search unless the user selected a web backend."""
++    try:
++        from tools.web_tools import _load_web_config
++
++        web = _load_web_config()
++        return not bool(web.get("search_backend") or web.get("backend"))
++    except Exception:
++        return True
++
++
+ def _xai_prefers_native_web_search() -> bool:
+     """True when xAI Responses should use Grok's native ``web_search`` built-in.
+ 
+@@ -307,6 +318,21 @@ class ResponsesApiTransport(ProviderTransport):
+ 
+         response_tools = _responses_tools(tools)
+ 
++        # ChatGPT's Codex Responses backend supports OpenAI's server-side
++        # web_search. Swap only an already-exposed Hermes web_search function,
++        # preserving toolset scope and explicit Exa/Tavily/etc. selections.
++        if is_codex_backend and response_tools and _codex_prefers_native_web_search():
++            has_client_web_search = any(
++                isinstance(t, dict) and t.get("name") == "web_search"
++                for t in response_tools
++            )
++            if has_client_web_search:
++                response_tools = [
++                    t for t in response_tools
++                    if not (isinstance(t, dict) and t.get("name") == "web_search")
++                ]
++                response_tools.append({"type": "web_search"})
++
+         # xAI server-side web search vs Hermes web providers.
+         #
+         # grok models on xAI's /v1/responses surface have a *native*,
 diff --git a/gateway/run.py b/gateway/run.py
 index 83342c39591b100101ab24fdcf59572392af7dec..057abf97744d293c60b8d32bf21054c77dee4263 100644
 --- a/gateway/run.py
@@ -1290,6 +1334,85 @@ index 63824c6eac56296502d2080d50c0e1dca92a172c..6be3cf3be4c8ff12e8775cd628613816
              goal=function_args.get("goal"),
              context=function_args.get("context"),
              tasks=_strip_model_hidden_task_fields(function_args.get("tasks")),
+diff --git a/tests/agent/transports/test_codex_transport.py b/tests/agent/transports/test_codex_transport.py
+index 70c4ba0e04cfea269da303e72091d0de78ba07b9..8a656e125d0cb64cad4db9688275b57d9f1f8816 100644
+--- a/tests/agent/transports/test_codex_transport.py
++++ b/tests/agent/transports/test_codex_transport.py
+@@ -363,6 +363,74 @@ class TestCodexBuildKwargs:
+         assert "web_search" not in names
+         assert "hermes_web_search" not in names
+ 
++    def test_codex_injects_native_web_search_when_client_web_search_present(self, transport):
++        """Codex OAuth uses OpenAI's server-side search when the web toolset
++        exposed ``web_search`` and no third-party search backend was selected.
++        """
++        kw = transport.build_kwargs(
++            model="gpt-5.6-sol",
++            messages=[{"role": "user", "content": "Find current research."}],
++            tools=[
++                {"type": "function", "function": {
++                    "name": "read_file", "description": "Read a file.",
++                    "parameters": {"type": "object", "properties": {}}}},
++                {"type": "function", "function": {
++                    "name": "web_search", "description": "Search the web.",
++                    "parameters": {"type": "object", "properties": {
++                        "query": {"type": "string"}}}}},
++            ],
++            is_codex_backend=True,
++        )
++
++        tools = kw.get("tools", [])
++        assert any(t.get("type") == "web_search" for t in tools), tools
++        assert any(
++            t.get("type") == "function" and t.get("name") == "read_file"
++            for t in tools
++        )
++        assert not any(
++            t.get("type") == "function" and t.get("name") == "web_search"
++            for t in tools
++        )
++
++    def test_codex_keeps_explicit_third_party_web_search(self, transport, monkeypatch):
++        """An explicitly configured Exa/Tavily/etc. backend remains the
++        client-side Hermes tool instead of being silently ignored.
++        """
++        import agent.transports.codex as codex_mod
++
++        monkeypatch.setattr(codex_mod, "_codex_prefers_native_web_search", lambda: False)
++        kw = transport.build_kwargs(
++            model="gpt-5.6-sol",
++            messages=[{"role": "user", "content": "Search."}],
++            tools=[{"type": "function", "function": {
++                "name": "web_search", "description": "Search the web.",
++                "parameters": {"type": "object", "properties": {
++                    "query": {"type": "string"}}}}}],
++            is_codex_backend=True,
++        )
++
++        tools = kw.get("tools", [])
++        assert not any(t.get("type") == "web_search" for t in tools)
++        assert any(
++            t.get("type") == "function" and t.get("name") == "web_search"
++            for t in tools
++        )
++
++    def test_codex_does_not_grant_search_when_web_tool_is_absent(self, transport):
++        kw = transport.build_kwargs(
++            model="gpt-5.6-sol",
++            messages=[{"role": "user", "content": "Read a file."}],
++            tools=[{"type": "function", "function": {
++                "name": "read_file", "description": "Read a file.",
++                "parameters": {"type": "object", "properties": {}}}}],
++            is_codex_backend=True,
++        )
++
++        assert not any(
++            t.get("type") == "web_search" for t in kw.get("tools", [])
++        )
++
+     def test_xai_renames_client_web_search_when_firecrawl_configured(self, transport, monkeypatch):
+         """Configured Firecrawl (or any non-xai backend) must keep Hermes
+         dispatch — rename the wire tool so Grok cannot hijack ``web_search``.
 diff --git a/tests/gateway/test_projects_center.py b/tests/gateway/test_projects_center.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..848ae7c2137a78ecd798017b73bfef376116f229
@@ -2789,6 +2912,36 @@ index a0e7722d742e68d353041f3be35fe7d0ef3a6f05..f6dcbe3b28bf561141139c4514e760c4
 +            cm.resolve_text_response_for_session("shared", "Confirm", actor_user_id="7")
 +            is True
 +        )
+diff --git a/tests/tools/test_web_providers.py b/tests/tools/test_web_providers.py
+index 5cd3113143942bb0b6b9c4e4588d1751ba710884..bde5d71d20548017871d161b805e381d2b7e81cd 100644
+--- a/tests/tools/test_web_providers.py
++++ b/tests/tools/test_web_providers.py
+@@ -122,6 +122,20 @@ class TestDefaultConfig:
+         assert web["extract_backend"] == ""
+ 
+ 
++class TestNativeCodexSearchAvailability:
++    def test_codex_native_search_does_not_enable_extract(self, monkeypatch):
++        from hermes_cli import config
++        from tools import web_tools
++
++        monkeypatch.setattr(config, "load_config", lambda: {
++            "model": {"provider": "openai-codex"},
++        })
++        monkeypatch.setattr(web_tools, "check_web_api_key", lambda: False)
++
++        assert web_tools.check_web_search_available() is True
++        assert web_tools.check_web_api_key() is False
++
++
+ # ---------------------------------------------------------------------------
+ # web_search_tool uses _get_search_backend
+ # ---------------------------------------------------------------------------
+@@ -469,4 +483,3 @@ class TestDisabledPluginDiagnostic:
+             assert "No web search provider configured" not in err
+         finally:
+             restore()
+-
 diff --git a/tests/tools/test_workspace_write_approval.py b/tests/tools/test_workspace_write_approval.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..4a18641dcbf5588f0c02b0e9d3a73bfb83ed9e99
@@ -3463,6 +3616,40 @@ index 951ea15aff5ea3afc94e1ff802c108de43f18db6..a258f9629a2098dbe1b9f2ec298eadab
          goal=args.get("goal"),
          context=args.get("context"),
          tasks=_strip_model_hidden_task_fields(args.get("tasks")),
+diff --git a/tools/web_tools.py b/tools/web_tools.py
+index 31c425f9a1bedbc8e8855c33e0d58884c95bcbb0..6227507cb32250289a7c945eb040fe3c616e9a60 100644
+--- a/tools/web_tools.py
++++ b/tools/web_tools.py
+@@ -1084,6 +1084,20 @@ def check_web_api_key() -> bool:
+         return False
+ 
+ 
++def check_web_search_available() -> bool:
++    """Return True for a configured web backend or Codex native search."""
++    if check_web_api_key():
++        return True
++    try:
++        from hermes_cli.config import load_config
++
++        model = load_config().get("model") or {}
++        return (model.get("provider") or "").strip().lower() == "openai-codex"
++    except Exception as exc:  # noqa: BLE001 - availability probes are non-fatal
++        logger.debug("Codex native web-search availability check failed: %s", exc)
++        return False
++
++
+ if __name__ == "__main__":
+     """
+     Simple test/demo when run directly
+@@ -1215,7 +1229,7 @@ registry.register(
+     toolset="web",
+     schema=WEB_SEARCH_SCHEMA,
+     handler=lambda args, **kw: web_search_tool(args.get("query", ""), limit=args.get("limit", 5)),
+-    check_fn=check_web_api_key,
++    check_fn=check_web_search_available,
+     requires_env=_web_requires_env(),
+     emoji="🔍",
+     max_result_size_chars=100_000,
 diff --git a/ui-tui/package.json b/ui-tui/package.json
 index 8965aadf1592b07940ec26ccbb432da51ecb945c..f1d0bbe36b64c203b40c45c5aa3aca2235986419 100644
 --- a/ui-tui/package.json
