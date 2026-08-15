@@ -44,6 +44,8 @@ On Telegram, `/charline` uses native Telegram inline buttons in one editable car
 
 Category details and `Назад` edit the same card. Opening the panel or a category does not start a Google operation, background task or external write. The user must still state the requested action, and the matching domain skill keeps its normal confirmation rules.
 
+On Gateway startup, restore Telegram's native command menu so a stale Web App button cannot keep opening an obsolete tunnel.
+
 ## Native Hermes Boundary
 
 Accept natural language and voice through the existing Hermes Gateway. After the user chooses or states a task, load the matching domain skill and follow `charline-orchestration`. Use Hermes sessions/topics, Memory, `clarify`, `delegate_task`, `/background`, cron and project surfaces directly.

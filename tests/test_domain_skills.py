@@ -70,6 +70,7 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "existing task center",
             "existing project center",
             "does not start a google operation",
+            "stale web app button",
         ):
             self.assertIn(phrase, text)
 

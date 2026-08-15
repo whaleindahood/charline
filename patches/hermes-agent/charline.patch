@@ -991,7 +991,7 @@ index 81a56b1b83905214586536feb6cfdab165e9cd48..3501fa43604b6c00bd36e5fd46c3fbe3
    "engines": {
      "node": ">=22.22.0",
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097db9324fe6 100644
+index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb0d6641d9 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,7 @@ import logging
@@ -1011,7 +1011,34 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
          # Notification mode for message sends.
          # "important" — only final responses, approvals, and slash confirmations
          #               trigger notifications; tool progress, streaming, status
-@@ -5705,16 +5708,19 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -3614,6 +3617,7 @@ class TelegramAdapter(BasePlatformAdapter):
+                     BotCommandScopeAllPrivateChats,
+                     BotCommandScopeAllGroupChats,
+                     BotCommandScopeDefault,
++                    MenuButtonCommands,
+                 )
+                 from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
+                 if not self._bot:
+@@ -3636,6 +3640,18 @@ class TelegramAdapter(BasePlatformAdapter):
+                         logger.info("[%s] set_my_commands OK for scope %s (%d cmds)", self.name, scope_name, len(bot_commands))
+                     except Exception as scope_err:
+                         logger.warning("[%s] set_my_commands FAILED for scope %s: %s", self.name, scope_name, scope_err)
++                # Replace any stale BotFather Web App button with Telegram's
++                # native command menu. /charline is registered above.
++                try:
++                    await self._bot.set_chat_menu_button(
++                        menu_button=MenuButtonCommands()
++                    )
++                except Exception as menu_button_err:
++                    logger.warning(
++                        "[%s] set_chat_menu_button FAILED: %s",
++                        self.name,
++                        menu_button_err,
++                    )
+                 # Forum topics don't inherit AllGroupChats — Telegram resolves
+                 # commands via BotCommandScopeChat(chat_id) for forum groups.
+                 # Lazy registration happens in _ensure_forum_commands on first
+@@ -5705,16 +5721,19 @@ class TelegramAdapter(BasePlatformAdapter):
                  # Telegram caps callback_data at 64 bytes; keep "cl:<id>:<idx>"
                  # short.
                  rows = []
@@ -1034,7 +1061,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
                          callback_data=f"cl:{clarify_id}:other",
                      )
                  ])
-@@ -5738,6 +5744,268 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5738,6 +5757,268 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.warning("[%s] send_clarify failed: %s", self.name, _redact_telegram_error_text(e))
              return SendResult(success=False, error=_redact_telegram_error_text(e))
  
@@ -1303,7 +1330,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
      async def send_model_picker(
          self,
          chat_id: str,
-@@ -6415,6 +6683,187 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6415,6 +6696,187 @@ class TelegramAdapter(BasePlatformAdapter):
          query_thread_id = getattr(query_message, "message_thread_id", None)
          query_user_name = getattr(query.from_user, "first_name", None)
  
@@ -1491,7 +1518,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
          # --- Model picker callbacks ---
          if data.startswith(("mp:", "mpg:", "mpv:", "mm:", "mc:", "mb", "mx", "mg:")):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -6464,7 +6913,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6464,7 +6926,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      await query.answer(text="⛔ You are not authorized to approve commands.")
                      return
  
@@ -1500,7 +1527,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
                  if not session_key:
                      await query.answer(text="This approval has already been resolved.")
                      return
-@@ -6479,7 +6928,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6479,7 +6941,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  # regression follow-up: 60s waits made stale taps common).
                  try:
                      from tools.approval import resolve_gateway_approval
@@ -1511,7 +1538,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
                      logger.info(
                          "Telegram button resolved %d approval(s) for session %s (choice=%s, user=%s)",
                          count, session_key, choice, user_display,
-@@ -6489,6 +6940,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6489,6 +6953,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      count = 0
  
                  if count:
@@ -1519,7 +1546,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
                      # Map choice to human-readable label
                      label_map = {
                          "once": "✅ Approved once",
-@@ -6648,6 +7100,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6648,6 +7113,10 @@ class TelegramAdapter(BasePlatformAdapter):
                  if not session_key:
                      await query.answer(text="This prompt has already been resolved.")
                      return
@@ -1530,7 +1557,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
  
                  user_display = getattr(query.from_user, "first_name", "User")
  
-@@ -6661,7 +7117,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6661,7 +7130,9 @@ class TelegramAdapter(BasePlatformAdapter):
                      flipped = False
                      try:
                          from tools.clarify_gateway import mark_awaiting_text
@@ -1541,7 +1568,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..be9c75d3f04ee870bcc76f41b734097d
                      except Exception as exc:
                          logger.warning("[%s] mark_awaiting_text failed: %s", self.name, exc)
  
-@@ -6712,7 +7170,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6712,7 +7183,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  self._clarify_state.pop(clarify_id, None)
                  try:
                      from tools.clarify_gateway import resolve_gateway_clarify
@@ -2313,10 +2340,10 @@ index 384932687023d934df99c5c6f20cf471536d7294..f5b6816a183e54307a122e6c0a623851
 -
 diff --git a/tests/gateway/test_telegram_charline_menu.py b/tests/gateway/test_telegram_charline_menu.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..3c24c2900ab0ed2fabad1c506df9693e02a9c1a8
+index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8aeac1a8f
 --- /dev/null
 +++ b/tests/gateway/test_telegram_charline_menu.py
-@@ -0,0 +1,348 @@
+@@ -0,0 +1,376 @@
 +import asyncio
 +import os
 +from types import SimpleNamespace
@@ -2382,6 +2409,34 @@ index 0000000000000000000000000000000000000000..3c24c2900ab0ed2fabad1c506df9693e
 +    assert command.gateway_only is True
 +    assert command.busy_policy == "dispatch"
 +    assert should_bypass_active_session("charline") is True
++
++
++def test_telegram_housekeeping_replaces_stale_webapp_menu_button():
++    class FakeMenuButtonCommands:
++        pass
++
++    async def run():
++        adapter = _adapter()
++        adapter._bot.set_my_commands = AsyncMock()
++        adapter._bot.set_chat_menu_button = AsyncMock()
++        adapter._set_status_indicator = AsyncMock()
++        adapter._setup_dm_topics = AsyncMock()
++
++        with (
++            patch(
++                "hermes_cli.commands.telegram_menu_commands",
++                return_value=([("charline", "Open Charline")], 0),
++            ),
++            patch("hermes_cli.commands.telegram_menu_max_commands", return_value=60),
++            patch("telegram.MenuButtonCommands", FakeMenuButtonCommands),
++        ):
++            await adapter._run_post_connect_housekeeping()
++
++        adapter._bot.set_chat_menu_button.assert_awaited_once()
++        menu_button = adapter._bot.set_chat_menu_button.await_args.kwargs["menu_button"]
++        assert isinstance(menu_button, FakeMenuButtonCommands)
++
++    asyncio.run(run())
 +
 +
 +def test_charline_panel_renders_six_requested_buttons():
