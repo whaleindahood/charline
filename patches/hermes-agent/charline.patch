@@ -613,7 +613,7 @@ index fa019133c0584ea4541a14065aad908e7ce7ba94..3a0744f09c5b0021d958316b17dadfc0
  
      participant_id = source.user_id_alt or source.user_id
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee02c1e71fc 100644
+index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..0cea188af2220c9a5948decd967db87a7cd93d43 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
 @@ -19,13 +19,15 @@ import asyncio
@@ -633,14 +633,15 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
  from pathlib import Path
  from typing import Any, Optional, Union
  
-@@ -1194,19 +1196,524 @@ class GatewaySlashCommandsMixin:
+@@ -1194,19 +1196,525 @@ class GatewaySlashCommandsMixin:
              return True
          return await self._resume_target_allowed(source, sid, allow_override=False)
  
 -    async def _handle_agents_command(self, event: MessageEvent) -> str:
 +    async def _handle_charline_command(self, event: MessageEvent) -> Union[str, None]:
 +        """Open Charline's native Telegram navigation panel."""
-+        adapter = self._adapter_for_source(event.source)
++        adapter_lookup = getattr(self, "_adapter_for_source", None)
++        adapter = adapter_lookup(event.source) if callable(adapter_lookup) else None
 +        send_menu = (
 +            getattr(type(adapter), "send_charline_menu", None) if adapter else None
 +        )
@@ -1159,7 +1160,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
              started = float(running_started.get(session_key, now))
              elapsed = max(0, int(now - started))
              is_pending = agent is _AGENT_PENDING_SENTINEL
-@@ -1225,17 +1732,12 @@ class GatewaySlashCommandsMixin:
+@@ -1225,17 +1733,12 @@ class GatewaySlashCommandsMixin:
          running_processes: list[dict] = []
          try:
              running_processes = [
@@ -1178,7 +1179,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
          lines = [
              t("gateway.agents.header"),
              "",
-@@ -1272,21 +1774,16 @@ class GatewaySlashCommandsMixin:
+@@ -1272,21 +1775,16 @@ class GatewaySlashCommandsMixin:
              if len(running_processes) > 12:
                  lines.append(t("gateway.agents.more", count=len(running_processes) - 12))
  
@@ -1204,7 +1205,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
                  if d.get("status") in ("running", "stalling", "finalizing")
              ]
          except Exception:
-@@ -1334,18 +1831,596 @@ class GatewaySlashCommandsMixin:
+@@ -1334,18 +1832,596 @@ class GatewaySlashCommandsMixin:
                      t("gateway.agents.more", count=len(delegations) - 12)
                  )
  
@@ -1357,9 +1358,8 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
 +            if result.success:
 +                return None
 +
-         return "\n".join(lines)
- 
--    async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
++        return "\n".join(lines)
++
 +    def _collect_task_center_items(
 +        self, session_key: str, parent_session_id: str = ""
 +    ) -> list[dict]:
@@ -1596,8 +1596,9 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
 +                ),
 +            ]
 +        )
-+        return "\n".join(lines)
-+
+         return "\n".join(lines)
+ 
+-    async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
 +    def _collect_stop_menu_items(
 +        self, session_key: str, parent_session_id: str = ""
 +    ) -> list[dict]:
@@ -1803,7 +1804,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
          """Handle /stop command - interrupt a running agent.
  
          When an agent is truly hung (blocked thread that never checks
-@@ -1361,6 +2436,36 @@ class GatewaySlashCommandsMixin:
+@@ -1361,6 +2437,36 @@ class GatewaySlashCommandsMixin:
          session_entry = await self.async_session_store.get_or_create_session(source)
          session_key = session_entry.session_key
  
@@ -1840,7 +1841,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
          agent = self._running_agents.get(session_key)
          if agent is _AGENT_PENDING_SENTINEL:
              # Force-clean the sentinel so the session is unlocked.
-@@ -1411,6 +2516,23 @@ class GatewaySlashCommandsMixin:
+@@ -1411,6 +2517,23 @@ class GatewaySlashCommandsMixin:
          # assistant.threads.setStatus survives a gateway restart or a turn
          # that died without a final send (#32295). Best-effort clear so
          # /stop always dismisses a phantom "is thinking...".
@@ -1864,7 +1865,77 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
          adapter = getattr(self, "adapters", {}).get(source.platform)
          if adapter and hasattr(adapter, "_stop_typing_with_metadata"):
              try:
-@@ -4402,9 +5524,6 @@ class GatewaySlashCommandsMixin:
+@@ -1648,25 +2771,56 @@ class GatewaySlashCommandsMixin:
+             getattr(getattr(event, "source", None), "platform", None),
+         )
+ 
+-    async def _handle_commands_command(self, event: MessageEvent) -> str:
++    async def _handle_commands_command(self, event: MessageEvent) -> Optional[str]:
+         from gateway.run import _telegramize_command_mentions
+         from hermes_cli.slash_exec import CommandContext, execute_command
+         from gateway.config import Platform
+ 
+         # Page size is a surface parameter (Telegram messages are shorter).
+         page_size = 15 if event.source.platform == Platform.TELEGRAM else 20
+-        reply = execute_command(
+-            "commands",
+-            CommandContext(
+-                surface="gateway",
+-                args=event.get_command_args(),
+-                options={"page_size": page_size},
+-            ),
+-        )
+-        return _telegramize_command_mentions(
+-            reply.text,
+-            getattr(getattr(event, "source", None), "platform", None),
+-        )
++        def _render(page: Optional[int] = None):
++            reply = execute_command(
++                "commands",
++                CommandContext(
++                    surface="gateway",
++                    args=str(page) if page is not None else event.get_command_args(),
++                    options={
++                        "page_size": page_size,
++                        "text_navigation": event.source.platform != Platform.TELEGRAM,
++                    },
++                ),
++            )
++            return reply, _telegramize_command_mentions(
++                reply.text, getattr(event.source, "platform", None)
++            )
++
++        reply, text = _render()
++        adapter_lookup = getattr(self, "_adapter_for_source", None)
++        adapter = adapter_lookup(event.source) if callable(adapter_lookup) else None
++        send_menu = getattr(type(adapter), "send_commands_menu", None) if adapter else None
++        if (
++            event.source.platform == Platform.TELEGRAM
++            and callable(send_menu)
++            and reply.data.get("total_pages")
++        ):
++            async def _on_page(page: int) -> dict:
++                page_reply, page_text = _render(page)
++                return {"text": page_text, **page_reply.data}
++
++            result = await adapter.send_commands_menu(
++                chat_id=event.source.chat_id,
++                text=text,
++                page=int(reply.data["page"]),
++                total_pages=int(reply.data["total_pages"]),
++                owner_user_id=str(event.source.user_id or ""),
++                on_page=_on_page,
++                metadata=self._thread_metadata_for_source(
++                    event.source, self._reply_anchor_for_event(event)
++                ),
++            )
++            if result.success:
++                return None
++        return text
+ 
+     async def _handle_model_command(self, event: MessageEvent) -> Optional[str]:
+         """Handle /model command — switch model.
+@@ -4402,9 +5556,6 @@ class GatewaySlashCommandsMixin:
              logger.exception("Failed to enable Telegram topic mode")
              return t("gateway.topic.enable_failed", error=exc)
  
@@ -1874,7 +1945,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
          if source.thread_id:
              try:
                  binding = await self._session_db.get_telegram_topic_binding(
-@@ -5432,7 +6551,12 @@ class GatewaySlashCommandsMixin:
+@@ -5432,7 +6583,12 @@ class GatewaySlashCommandsMixin:
          else:
              choice = "once"
  
@@ -1888,7 +1959,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee0
          if not count:
              return t("gateway.approve.no_pending")
  
-@@ -5486,6 +6610,7 @@ class GatewaySlashCommandsMixin:
+@@ -5486,6 +6642,7 @@ class GatewaySlashCommandsMixin:
          count = resolve_gateway_approval(
              session_key, "deny", resolve_all=resolve_all,
              reason=reason or None,
@@ -2017,6 +2088,32 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..7ee0c205b79855c65292e94572c869a6
  
  
  def _sanitize_slack_name(raw: str) -> str:
+diff --git a/hermes_cli/slash_exec.py b/hermes_cli/slash_exec.py
+index 85c49bb8e2bcd1b9430cf241241609900f322897..bcd362104e3e32f94c64a326e8c69c352246e224 100644
+--- a/hermes_cli/slash_exec.py
++++ b/hermes_cli/slash_exec.py
+@@ -215,7 +215,7 @@ def _exec_commands(ctx: CommandContext) -> CommandReply:
+         "",
+         *page_entries,
+     ]
+-    if total_pages > 1:
++    if total_pages > 1 and ctx.options.get("text_navigation", True):
+         nav_parts = []
+         if page > 1:
+             nav_parts.append(t("gateway.commands.nav_prev", page=page - 1))
+@@ -224,7 +224,11 @@ def _exec_commands(ctx: CommandContext) -> CommandReply:
+         lines.extend(["", " | ".join(nav_parts)])
+     if page != requested_page:
+         lines.append(t("gateway.commands.out_of_range", requested=requested_page, page=page))
+-    return CommandReply("\n".join(lines), format="markdown")
++    return CommandReply(
++        "\n".join(lines),
++        data={"page": page, "total_pages": total_pages},
++        format="markdown",
++    )
+ 
+ 
+ # ---------------------------------------------------------------------------
 diff --git a/hermes_state.py b/hermes_state.py
 index 92b238c061fa841aefb34b0c559f9bd431fa4fc0..e56a84c027af87e750360aa88e7cecd2b9774c12 100644
 --- a/hermes_state.py
@@ -2143,7 +2240,7 @@ index 81a56b1b83905214586536feb6cfdab165e9cd48..3501fa43604b6c00bd36e5fd46c3fbe3
    "engines": {
      "node": ">=22.22.0",
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db1a7b2ce9 100644
+index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653077ebf62 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,7 @@ import logging
@@ -2202,17 +2299,18 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
      LinkPreviewOptions = _LPO
      Application = _App
      CommandHandler = _CH
-@@ -876,6 +884,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -876,6 +884,10 @@ class TelegramAdapter(BasePlatformAdapter):
          # Clarify button state: clarify_id → session_key (for the clarify tool's
          # multiple-choice prompts; see GatewayRunner clarify_callback wiring).
          self._clarify_state: Dict[str, str] = {}
 +        self._stop_menu_state: Dict[str, dict] = {}
 +        self._charline_menu_state: Dict[str, dict] = {}
 +        self._automation_menu_state: Dict[str, dict] = {}
++        self._commands_menu_state: Dict[str, dict] = {}
          # Notification mode for message sends.
          # "important" — only final responses, approvals, and slash confirmations
          #               trigger notifications; tool progress, streaming, status
-@@ -1317,13 +1328,8 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -1317,13 +1329,8 @@ class TelegramAdapter(BasePlatformAdapter):
          """Drop the stale ``telegram_dm_topic_bindings`` row for a
          topic Telegram has confirmed deleted.
  
@@ -2228,7 +2326,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
          failed user-facing send.
          """
          if chat_id is None or thread_id is None:
-@@ -3614,6 +3620,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -3614,6 +3621,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      BotCommandScopeAllPrivateChats,
                      BotCommandScopeAllGroupChats,
                      BotCommandScopeDefault,
@@ -2236,7 +2334,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                  )
                  from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
                  if not self._bot:
-@@ -3636,6 +3643,18 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -3636,6 +3644,18 @@ class TelegramAdapter(BasePlatformAdapter):
                          logger.info("[%s] set_my_commands OK for scope %s (%d cmds)", self.name, scope_name, len(bot_commands))
                      except Exception as scope_err:
                          logger.warning("[%s] set_my_commands FAILED for scope %s: %s", self.name, scope_name, scope_err)
@@ -2255,7 +2353,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                  # Forum topics don't inherit AllGroupChats — Telegram resolves
                  # commands via BotCommandScopeChat(chat_id) for forum groups.
                  # Lazy registration happens in _ensure_forum_commands on first
-@@ -5705,16 +5724,19 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5705,16 +5725,19 @@ class TelegramAdapter(BasePlatformAdapter):
                  # Telegram caps callback_data at 64 bytes; keep "cl:<id>:<idx>"
                  # short.
                  rows = []
@@ -2278,7 +2376,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                          callback_data=f"cl:{clarify_id}:other",
                      )
                  ])
-@@ -5738,6 +5760,476 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5738,6 +5761,532 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.warning("[%s] send_clarify failed: %s", self.name, _redact_telegram_error_text(e))
              return SendResult(success=False, error=_redact_telegram_error_text(e))
  
@@ -2504,6 +2602,62 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
 +        except Exception as exc:
 +            logger.warning(
 +                "[%s] send_charline_menu failed: %s",
++                self.name,
++                _redact_telegram_error_text(exc),
++            )
++            return SendResult(success=False, error=_redact_telegram_error_text(exc))
++
++    @staticmethod
++    def _commands_keyboard(menu_id: str, page: int, total_pages: int) -> Any:
++        buttons = []
++        if page > 1:
++            buttons.append(InlineKeyboardButton("←", callback_data=f"cm:{menu_id}:{page - 1}"))
++        buttons.append(InlineKeyboardButton(
++            f"{page}/{total_pages}", callback_data=f"cm:{menu_id}:noop"
++        ))
++        if page < total_pages:
++            buttons.append(InlineKeyboardButton("→", callback_data=f"cm:{menu_id}:{page + 1}"))
++        return InlineKeyboardMarkup([buttons])
++
++    async def send_commands_menu(
++        self,
++        chat_id: str,
++        text: str,
++        page: int,
++        total_pages: int,
++        on_page,
++        owner_user_id: str = "",
++        metadata: Optional[Dict[str, Any]] = None,
++    ) -> SendResult:
++        """Send paginated command help as one owner-bound Telegram message."""
++        if not self._bot:
++            return SendResult(success=False, error="Not connected")
++        menu_id = secrets.token_hex(4)
++        thread_id = self._metadata_thread_id(metadata)
++        try:
++            kwargs: Dict[str, Any] = {
++                "chat_id": normalize_telegram_chat_id(chat_id),
++                "text": self.format_message(text),
++                "parse_mode": ParseMode.MARKDOWN_V2,
++                "reply_markup": self._commands_keyboard(menu_id, page, total_pages),
++                **self._link_preview_kwargs(),
++            }
++            kwargs.update(self._thread_kwargs_for_send(chat_id, thread_id, metadata))
++            message = await self._send_message_with_thread_fallback(**kwargs)
++            self._commands_menu_state[menu_id] = {
++                "owner_user_id": str(owner_user_id or ""),
++                "chat_id": str(normalize_telegram_chat_id(chat_id)),
++                "thread_id": str(thread_id or ""),
++                "message_id": str(message.message_id),
++                "created_at": time.monotonic(),
++                "page": page,
++                "total_pages": total_pages,
++                "callback": on_page,
++            }
++            return SendResult(success=True, message_id=str(message.message_id))
++        except Exception as exc:
++            logger.warning(
++                "[%s] send_commands_menu failed: %s",
 +                self.name,
 +                _redact_telegram_error_text(exc),
 +            )
@@ -2755,10 +2909,77 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
      async def send_model_picker(
          self,
          chat_id: str,
-@@ -6415,6 +6907,449 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6415,6 +6964,516 @@ class TelegramAdapter(BasePlatformAdapter):
          query_thread_id = getattr(query_message, "message_thread_id", None)
          query_user_name = getattr(query.from_user, "first_name", None)
  
++        # --- Paginated command catalog (cm:menu_id:page) ---
++        if data.startswith("cm:"):
++            parts = data.split(":", 2)
++            if len(parts) != 3:
++                await query.answer(text="Некорректная страница.")
++                return
++            caller_id = str(getattr(query.from_user, "id", ""))
++            if not self._is_callback_user_authorized(
++                caller_id,
++                chat_id=query_chat_id,
++                chat_type=str(query_chat_type) if query_chat_type is not None else None,
++                thread_id=str(query_thread_id) if query_thread_id is not None else None,
++                user_name=query_user_name,
++            ):
++                await query.answer(text="Нет доступа к этому меню.")
++                return
++            menu_id, raw_page = parts[1], parts[2]
++            now = time.monotonic()
++            for stale_id, stale in list(self._commands_menu_state.items()):
++                if now - float(stale.get("created_at", now)) > 900:
++                    self._commands_menu_state.pop(stale_id, None)
++            state = self._commands_menu_state.get(menu_id)
++            message_id = str(getattr(query_message, "message_id", "") or "")
++            if not state:
++                await query.answer(text="Меню устарело. Выполните /commands снова.")
++                return
++            if state.get("owner_user_id") and caller_id != state["owner_user_id"]:
++                await query.answer(text="Нет доступа к этому меню.")
++                return
++            if (
++                str(query_chat_id or "") != state.get("chat_id", "")
++                or str(query_thread_id or "") != state.get("thread_id", "")
++                or message_id != state.get("message_id", "")
++            ):
++                await query.answer(text="Меню устарело. Выполните /commands снова.")
++                return
++            if raw_page == "noop":
++                await query.answer()
++                return
++            try:
++                page = int(raw_page)
++            except ValueError:
++                await query.answer(text="Некорректная страница.")
++                return
++            if page == state.get("page") or not 1 <= page <= int(state["total_pages"]):
++                await query.answer()
++                return
++            callback = state.get("callback")
++            if not callable(callback):
++                await query.answer(text="Меню устарело. Выполните /commands снова.")
++                return
++            await query.answer()
++            try:
++                result = await callback(page)
++                state["page"] = int(result["page"])
++                state["total_pages"] = int(result["total_pages"])
++                await query.edit_message_text(
++                    text=self.format_message(str(result["text"])),
++                    parse_mode=ParseMode.MARKDOWN_V2,
++                    reply_markup=self._commands_keyboard(
++                        menu_id, state["page"], state["total_pages"]
++                    ),
++                )
++            except Exception:
++                logger.exception("Telegram commands-menu callback failed")
++            return
++
 +        # --- Charline navigation callbacks (ch:menu_id:action) ---
 +        if data.startswith("ch:"):
 +            parts = data.split(":", 2)
@@ -3205,7 +3426,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
          # --- Model picker callbacks ---
          if data.startswith(("mp:", "mpg:", "mpv:", "mm:", "mc:", "mb", "mx", "mg:")):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -6464,7 +7399,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6464,7 +7523,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      await query.answer(text="⛔ You are not authorized to approve commands.")
                      return
  
@@ -3214,7 +3435,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                  if not session_key:
                      await query.answer(text="This approval has already been resolved.")
                      return
-@@ -6479,7 +7414,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6479,7 +7538,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  # regression follow-up: 60s waits made stale taps common).
                  try:
                      from tools.approval import resolve_gateway_approval
@@ -3225,7 +3446,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                      logger.info(
                          "Telegram button resolved %d approval(s) for session %s (choice=%s, user=%s)",
                          count, session_key, choice, user_display,
-@@ -6489,6 +7426,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6489,6 +7550,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      count = 0
  
                  if count:
@@ -3233,7 +3454,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                      # Map choice to human-readable label
                      label_map = {
                          "once": "✅ Approved once",
-@@ -6648,6 +7586,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6648,6 +7710,10 @@ class TelegramAdapter(BasePlatformAdapter):
                  if not session_key:
                      await query.answer(text="This prompt has already been resolved.")
                      return
@@ -3244,7 +3465,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
  
                  user_display = getattr(query.from_user, "first_name", "User")
  
-@@ -6661,7 +7603,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6661,7 +7727,9 @@ class TelegramAdapter(BasePlatformAdapter):
                      flipped = False
                      try:
                          from tools.clarify_gateway import mark_awaiting_text
@@ -3255,7 +3476,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db
                      except Exception as exc:
                          logger.warning("[%s] mark_awaiting_text failed: %s", self.name, exc)
  
-@@ -6712,7 +7656,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6712,7 +7780,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  self._clarify_state.pop(clarify_id, None)
                  try:
                      from tools.clarify_gateway import resolve_gateway_clarify
@@ -3411,6 +3632,44 @@ index a7f3e4fb386e651d3df55579d40f3da0edd302a2..0b7ec9206c6f74da7d07f3b8b97c7c5b
      assert cached[0] is agent_obj
  
 -
+diff --git a/tests/gateway/test_gateway_command_help.py b/tests/gateway/test_gateway_command_help.py
+index 773d2186061b2bf44366da219920be2d696bb99d..42b8ac9769db991b20a644fa2ea4a85736505132 100644
+--- a/tests/gateway/test_gateway_command_help.py
++++ b/tests/gateway/test_gateway_command_help.py
+@@ -1,6 +1,7 @@
+ """Gateway command help rendering tests."""
+ 
+ import pytest
++from unittest.mock import AsyncMock
+ 
+ from gateway.config import Platform
+ from gateway.platforms.base import MessageEvent
+@@ -63,3 +64,25 @@ async def test_commands_sanitizes_slash_command_mentions_for_telegram(monkeypatc
+     assert "`/Linear`" not in result
+ 
+ 
++@pytest.mark.asyncio
++async def test_commands_uses_native_telegram_pagination(monkeypatch):
++    class Adapter:
++        send_commands_menu = AsyncMock(return_value=type("R", (), {"success": True})())
++
++    runner = _make_runner()
++    adapter = Adapter()
++    runner._adapter_for_source = lambda source: adapter
++    runner._thread_metadata_for_source = lambda source, reply: {}
++    runner._reply_anchor_for_event = lambda event: None
++    event = _make_event("/commands", Platform.TELEGRAM)
++
++    result = await runner._handle_commands_command(event)
++
++    assert result is None
++    kwargs = adapter.send_commands_menu.await_args.kwargs
++    assert kwargs["page"] == 1
++    assert kwargs["total_pages"] > 1
++    second = await kwargs["on_page"](2)
++    assert second["page"] == 2
++    assert second["total_pages"] == kwargs["total_pages"]
++    assert "/commands 3" not in second["text"]
 diff --git a/tests/gateway/test_gateway_silence_tokens.py b/tests/gateway/test_gateway_silence_tokens.py
 index 0cd1d5936775e543a4c59a9fa49e699078822295..051257cd54d802ad8bd05de70007fb101ff3d380 100644
 --- a/tests/gateway/test_gateway_silence_tokens.py
@@ -4252,10 +4511,10 @@ index 384932687023d934df99c5c6f20cf471536d7294..f5b6816a183e54307a122e6c0a623851
 -
 diff --git a/tests/gateway/test_telegram_charline_menu.py b/tests/gateway/test_telegram_charline_menu.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..a2de0d7cb5e680783b23e93b9bd0ebe6d56e7fab
+index 0000000000000000000000000000000000000000..c7242f4b4cc5ac6e37dbc286d7f27032e76bbcfb
 --- /dev/null
 +++ b/tests/gateway/test_telegram_charline_menu.py
-@@ -0,0 +1,489 @@
+@@ -0,0 +1,534 @@
 +import asyncio
 +import os
 +from types import SimpleNamespace
@@ -4558,6 +4817,51 @@ index 0000000000000000000000000000000000000000..a2de0d7cb5e680783b23e93b9bd0ebe6
 +
 +        assert on_action.await_args_list[1].args == ("memory_remove", item)
 +        assert "Запись удалена" in confirm_query.edit_message_text.await_args.kwargs["text"]
++
++    asyncio.run(run())
++
++
++def test_commands_menu_edits_one_message_with_arrow_buttons():
++    async def run():
++        adapter = _adapter()
++        on_page = AsyncMock(return_value={
++            "text": "Страница 2",
++            "page": 2,
++            "total_pages": 3,
++        })
++        button_patch, markup_patch = _telegram_buttons()
++        with button_patch, markup_patch:
++            result = await adapter.send_commands_menu(
++                chat_id="42",
++                text="Страница 1",
++                page=1,
++                total_pages=3,
++                owner_user_id="7",
++                on_page=on_page,
++            )
++            assert result.success
++            menu_id = next(iter(adapter._commands_menu_state))
++            sent = adapter._bot.send_message.await_args.kwargs
++            labels = [
++                button.text
++                for row in sent["reply_markup"].inline_keyboard
++                for button in row
++            ]
++            assert labels == ["1/3", "→"]
++
++            query = _query(f"cm:{menu_id}:2")
++            with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++                await adapter._handle_callback_query(
++                    MagicMock(callback_query=query), MagicMock()
++                )
++            assert on_page.await_args.args == (2,)
++            assert query.edit_message_text.await_args.kwargs["text"] == "Страница 2"
++            labels = [
++                button.text
++                for row in query.edit_message_text.await_args.kwargs["reply_markup"].inline_keyboard
++                for button in row
++            ]
++            assert labels == ["←", "2/3", "→"]
 +
 +    asyncio.run(run())
 +

@@ -45,7 +45,7 @@ On Telegram, `/charline` uses native Telegram inline buttons in one editable car
 - `Исследование` exposes sourced analysis without creating another delegation engine.
 - `Новая задача` asks the user to write or dictate the request normally.
 - `Новый проект` explicitly creates one isolated Telegram topic and Hermes session.
-- `Все функции Hermes` opens the existing paginated `/commands` catalog so advanced capabilities remain available without crowding the home card.
+- `Все функции Hermes` opens the existing paginated `/commands` catalog with native `←`/`→` buttons that edit one Telegram message, so advanced capabilities remain available without crowding the home card.
 
 Category details and `Назад` edit the same card. Input-requiring actions use Telegram `ForceReply`; the reply remains an ordinary Hermes message in the same General or project session, so it keeps normal skills, context and confirmation rules. Read-only cards may fetch current Google data; no category click performs an external write.
 
