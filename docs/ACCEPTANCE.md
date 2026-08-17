@@ -64,7 +64,7 @@ Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 5. Change one field after preview; verify the old confirmation is invalid and a new preview is required.
 6. Separately confirm one sandbox Calendar creation; receive one concise result after exact read-back.
 7. In the ordinary direct-message chat, start two independent bounded tasks in parallel; continue the conversation, inspect only current-chat work through `/agents` with no Gateway service jobs shown, and verify each completion is labelled and separately verified.
-8. Opt into `/topic` separately; verify General remains one permanent main session, `/projects new [name]` and `Новый проект` explicitly create isolated topics, and two project conversations remain isolated from General and each other.
+8. Opt into `/topic` separately; send two messages from All Messages and verify Telegram creates two isolated topic sessions; verify `/projects new [name]` and `Новый проект` also create named isolated topics.
 9. Ask one unrelated general question and verify Charline answers normally without forcing a menu or domain transaction.
 
 ## Release decision

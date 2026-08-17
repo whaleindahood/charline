@@ -39,7 +39,7 @@ If Google reports `invalid_grant` or a revoked token, use the installed Google W
 - Telegram uses the existing Hermes Gateway and active `default` profile.
 - For quiet Russian Telegram UX, set `display.language: ru`; set `display.platforms.telegram.tool_progress`, `interim_assistant_messages` and `busy_ack_detail` to `off`/`false`. Keep `long_running_notifications` enabled when one editable heartbeat is useful for long/background work; disable it only for strictly final-only delivery.
 - Keep `platforms.telegram.extra.rich_messages: true` for native Rich Message tables. The current pilot also uses `rich_drafts: true`; if a client leaves stale draft frames, set it to `false` and restart the Gateway. `/tasks` uses an editable native control card independently of rich drafts.
-- Keep topic mode opt-in. General remains the permanent main chat. Create one Telegram topic per independent project only through `/projects new [name]` or `Новый проект`; `/projects` is the compact overview. Do not use Kanban unless shared durable worker state is required.
+- Keep topic mode opt-in. After activation, All Messages starts a new Telegram topic/session automatically; `/projects new [name]` and `Новый проект` create named projects. `/projects` is the compact overview. Do not use Kanban unless shared durable worker state is required.
 - Do not start a second process with the same Telegram bot token.
 - Use Hermes Desktop/Dashboard for session, cron, skill and process inspection.
 

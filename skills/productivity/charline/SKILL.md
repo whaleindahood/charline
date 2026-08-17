@@ -22,7 +22,7 @@ Return a short list with natural language examples:
 - Reminders and briefings — confirmed one-time or recurring Hermes cron work: `Напомни завтра оплатить счёт`.
 - Workspace — Drive, Docs, Sheets and Contacts: `Найди документ с планом проекта`.
 - Research — sourced analysis with bounded delegation: `Сравни три варианта и приведи источники`.
-- Projects — General remains the main chat; `/projects` lists isolated Telegram topic projects and `/projects new [name]` creates one explicitly: `Создай отдельный проект для ремонта и веди задачи там`.
+- Projects — a message from All Messages starts an isolated Telegram topic automatically; `/projects new [name]` creates a named project: `Создай отдельный проект для ремонта и веди задачи там`.
 - Task control — `/tasks` opens the current-chat task center with refresh and scoped stop controls; ordinary cancellation wording remains supported.
 - Developer work — repository analysis, tests and confirmed deployment: `Проверь проект и предложи исправления`.
 
@@ -36,20 +36,20 @@ Use normal Markdown headings, lists and links. Use Markdown tables only for comp
 
 On Telegram, `/charline` uses native Telegram inline buttons in one editable card:
 
-- `Сегодня` performs concurrent read-only Calendar and Gmail reads and combines them with active work, pending decisions and upcoming Hermes schedules. In General, active work and pending decisions include the caller's owned project sessions. Partial source failure must remain visible instead of hiding the available sections.
+- `Сегодня` performs concurrent read-only Calendar and Gmail reads and combines them with active work, pending decisions and upcoming Hermes schedules. Partial source failure must remain visible instead of hiding the available sections.
 - `Календарь`, `Почта` and `Файлы` perform bounded useful read views; writes and searches needing user input continue through ordinary conversation and normal confirmation.
-- `Задачи` opens the existing task center. From General it aggregates the caller's main and owned project sessions; inside a project it remains scoped to that project.
+- `Задачи` opens the existing task center scoped to the current topic; project overview may aggregate only the caller's owned sessions.
 - `Проекты` opens a native owned-project card with active-work counts and scoped `Сводка`/`Задачи` actions. Telegram's own topic list remains the navigation surface; do not invent web deep links.
 - `Расписания` opens the existing Hermes cron jobs with refresh, pause, resume, run-now and durable execution history; creation remains conversational.
 - `Память` reads the existing Hermes `USER.md`/`MEMORY.md` entries and offers owner-bound two-step deletion with read-back. The store has no per-entry timestamps; do not fabricate dates. `Сервисы` shows connector presence without reading credential values.
 - `Исследование` exposes sourced analysis without creating another delegation engine.
 - `Новая задача` asks the user to write or dictate the request normally.
-- `Новый проект` explicitly creates one isolated Telegram topic and Hermes session.
+- `Новый проект` creates one named isolated Telegram topic and Hermes session; All Messages remains the native shortcut for an automatic new conversation.
 - `Все функции Hermes` opens the existing paginated `/commands` catalog with native `←`/`→` buttons that edit one Telegram message, so advanced capabilities remain available without crowding the home card.
 
-Category details and `Назад` edit the same card. Input-requiring actions use Telegram `ForceReply`; the reply remains an ordinary Hermes message in the same General or project session, so it keeps normal skills, context and confirmation rules. Read-only cards may fetch current Google data; no category click performs an external write.
+Category details and `Назад` edit the same card. Input-requiring actions use Telegram `ForceReply`; the reply remains an ordinary Hermes message in the same topic session, so it keeps normal skills, context and confirmation rules. Read-only cards may fetch current Google data; no category click performs an external write.
 
-The home card identifies project scope from the current Telegram thread and shows the project title. General never guesses or inherits the latest project thread.
+The home card identifies scope from the current Telegram thread and shows its title. A brand-new thread keeps its own session and is never merged into an older topic.
 
 On Gateway startup, restore Telegram's native command menu so a stale Web App button cannot keep opening an obsolete tunnel.
 
