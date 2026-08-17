@@ -34,6 +34,8 @@ Use normal Markdown headings, lists and links. Use Markdown tables only for comp
 
 ## Native Telegram Panel
 
+The persistent Telegram command menu exposes only the ten daily sections. `/commands` remains the complete paginated Hermes catalog; hidden technical commands are not disabled.
+
 On Telegram, `/charline` uses native Telegram inline buttons in one editable card:
 
 - `Сегодня` performs concurrent read-only Calendar and Gmail reads and combines them with active work, pending decisions and upcoming Hermes schedules. Partial source failure must remain visible instead of hiding the available sections.

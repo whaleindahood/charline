@@ -509,7 +509,7 @@ index 83342c39591b100101ab24fdcf59572392af7dec..ed37b2c7fd366122d22cf71e2afcb2ad
              ])
          return "\n".join(lines)
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846b5894a80 100644
+index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..b141f540e76d009c3ec8d073bb6a427d277ab955 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
 @@ -19,13 +19,15 @@ import asyncio
@@ -529,13 +529,14 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
  from pathlib import Path
  from typing import Any, Optional, Union
  
-@@ -1194,19 +1196,525 @@ class GatewaySlashCommandsMixin:
+@@ -1194,19 +1196,541 @@ class GatewaySlashCommandsMixin:
              return True
          return await self._resume_target_allowed(source, sid, allow_override=False)
  
 -    async def _handle_agents_command(self, event: MessageEvent) -> str:
 +    async def _handle_charline_command(self, event: MessageEvent) -> Union[str, None]:
 +        """Open Charline's native Telegram navigation panel."""
++        initial_action = event.get_command_args().strip().lower()
 +        adapter_lookup = getattr(self, "_adapter_for_source", None)
 +        adapter = adapter_lookup(event.source) if callable(adapter_lookup) else None
 +        send_menu = (
@@ -685,11 +686,26 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
 +                    return None
 +                return None
 +
++            initial_section = "home"
++            initial_items = None
++            if initial_action in {"calendar", "mail", "files", "tasks", "automations"}:
++                return await _on_action(initial_action)
++            if initial_action == "projects":
++                project_result = await _on_action("projects")
++                if not isinstance(project_result, dict):
++                    return project_result
++                initial_section = "projects"
++                initial_items = list(project_result.get("items") or [])
++            elif initial_action in {"memory", "research"}:
++                initial_section = initial_action
++
 +            result = await adapter.send_charline_menu(
 +                chat_id=event.source.chat_id,
 +                session_key=self._session_key_for_source(event.source),
 +                owner_user_id=str(event.source.user_id or ""),
 +                project_title=project_title,
++                initial_section=initial_section,
++                initial_items=initial_items,
 +                on_action=_on_action,
 +                metadata=self._thread_metadata_for_source(
 +                    event.source, self._reply_anchor_for_event(event)
@@ -1056,7 +1072,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
              started = float(running_started.get(session_key, now))
              elapsed = max(0, int(now - started))
              is_pending = agent is _AGENT_PENDING_SENTINEL
-@@ -1225,17 +1733,12 @@ class GatewaySlashCommandsMixin:
+@@ -1225,17 +1749,12 @@ class GatewaySlashCommandsMixin:
          running_processes: list[dict] = []
          try:
              running_processes = [
@@ -1075,7 +1091,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          lines = [
              t("gateway.agents.header"),
              "",
-@@ -1272,21 +1775,16 @@ class GatewaySlashCommandsMixin:
+@@ -1272,21 +1791,16 @@ class GatewaySlashCommandsMixin:
              if len(running_processes) > 12:
                  lines.append(t("gateway.agents.more", count=len(running_processes) - 12))
  
@@ -1101,7 +1117,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
                  if d.get("status") in ("running", "stalling", "finalizing")
              ]
          except Exception:
-@@ -1334,18 +1832,598 @@ class GatewaySlashCommandsMixin:
+@@ -1334,18 +1848,598 @@ class GatewaySlashCommandsMixin:
                      t("gateway.agents.more", count=len(delegations) - 12)
                  )
  
@@ -1702,7 +1718,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          """Handle /stop command - interrupt a running agent.
  
          When an agent is truly hung (blocked thread that never checks
-@@ -1361,6 +2439,36 @@ class GatewaySlashCommandsMixin:
+@@ -1361,6 +2455,36 @@ class GatewaySlashCommandsMixin:
          session_entry = await self.async_session_store.get_or_create_session(source)
          session_key = session_entry.session_key
  
@@ -1739,7 +1755,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          agent = self._running_agents.get(session_key)
          if agent is _AGENT_PENDING_SENTINEL:
              # Force-clean the sentinel so the session is unlocked.
-@@ -1411,6 +2519,23 @@ class GatewaySlashCommandsMixin:
+@@ -1411,6 +2535,23 @@ class GatewaySlashCommandsMixin:
          # assistant.threads.setStatus survives a gateway restart or a turn
          # that died without a final send (#32295). Best-effort clear so
          # /stop always dismisses a phantom "is thinking...".
@@ -1763,7 +1779,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          adapter = getattr(self, "adapters", {}).get(source.platform)
          if adapter and hasattr(adapter, "_stop_typing_with_metadata"):
              try:
-@@ -1648,25 +2773,56 @@ class GatewaySlashCommandsMixin:
+@@ -1648,25 +2789,56 @@ class GatewaySlashCommandsMixin:
              getattr(getattr(event, "source", None), "platform", None),
          )
  
@@ -1833,7 +1849,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
  
      async def _handle_model_command(self, event: MessageEvent) -> Optional[str]:
          """Handle /model command — switch model.
-@@ -4402,9 +5558,6 @@ class GatewaySlashCommandsMixin:
+@@ -4402,9 +5574,6 @@ class GatewaySlashCommandsMixin:
              logger.exception("Failed to enable Telegram topic mode")
              return t("gateway.topic.enable_failed", error=exc)
  
@@ -1843,7 +1859,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          if source.thread_id:
              try:
                  binding = await self._session_db.get_telegram_topic_binding(
-@@ -5432,7 +6585,12 @@ class GatewaySlashCommandsMixin:
+@@ -5432,7 +6601,12 @@ class GatewaySlashCommandsMixin:
          else:
              choice = "once"
  
@@ -1857,7 +1873,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          if not count:
              return t("gateway.approve.no_pending")
  
-@@ -5486,6 +6644,7 @@ class GatewaySlashCommandsMixin:
+@@ -5486,6 +6660,7 @@ class GatewaySlashCommandsMixin:
          count = resolve_gateway_approval(
              session_key, "deny", resolve_all=resolve_all,
              reason=reason or None,
@@ -1866,7 +1882,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..fafb98d182a62caa693dccb15942a846
          if not count:
              return t("gateway.deny.no_pending")
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index f3323f020ae1d038e3fd732a1a48237b36212d4f..7ee0c205b79855c65292e94572c869a68aab81e2 100644
+index f3323f020ae1d038e3fd732a1a48237b36212d4f..1a0cd2ea59e28a397f09b5920c5728bbd5795658 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -18,6 +18,7 @@ import subprocess
@@ -1908,7 +1924,68 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..7ee0c205b79855c65292e94572c869a6
          if tg_name:
              result.append((tg_name, cmd.description))
      for name, description, args_hint in _iter_plugin_command_entries():
-@@ -927,27 +934,25 @@ def _collect_gateway_skill_entries(
+@@ -676,6 +683,30 @@ registry is still dispatchable when typed manually, but operational commands
+ need to survive the visible menu cap ahead of lower-priority built-ins.
+ """
+ 
++_CHARLINE_TELEGRAM_MENU = (
++    ("charline", "Главная панель ассистента"),
++    ("calendar", "Календарь — события и встречи"),
++    ("mail", "Почта — непрочитанные письма"),
++    ("files", "Файлы — Google Drive"),
++    ("projects", "Проекты и их статус"),
++    ("tasks", "Активные и фоновые задачи"),
++    ("schedules", "Расписания и автоматизации"),
++    ("memory", "Память ассистента"),
++    ("research", "Поиск и исследования"),
++    ("commands", "Все функции Hermes"),
++)
++
++_CHARLINE_TELEGRAM_REWRITES = {
++    "calendar": "calendar",
++    "mail": "mail",
++    "files": "files",
++    "projects": "projects",
++    "tasks": "tasks",
++    "schedules": "automations",
++    "memory": "memory",
++    "research": "research",
++}
++
+ 
+ def _nested_mapping(root: Mapping[str, Any], *path: str) -> Mapping[str, Any]:
+     node: Any = root
+@@ -719,13 +750,29 @@ def _telegram_command_menu_config() -> dict[str, Any]:
+     else:
+         priority = []
+ 
++    style = str(menu_cfg.get("style") or "default").strip().lower()
++    if style not in {"default", "charline"}:
++        style = "default"
++
+     return {
+         "max_commands": max_commands,
+         "priority_mode": priority_mode,
+         "priority": priority,
++        "style": style,
+     }
+ 
+ 
++def telegram_charline_command_rewrite(text: str) -> str:
++    """Translate a curated Telegram menu tap into an existing Charline action."""
++    if _telegram_command_menu_config()["style"] != "charline":
++        return text
++    stripped = str(text or "").strip()
++    if not stripped.startswith("/") or any(char.isspace() for char in stripped):
++        return text
++    action = _CHARLINE_TELEGRAM_REWRITES.get(stripped[1:].lower())
++    return f"/charline {action}" if action else text
++
++
+ def telegram_menu_max_commands() -> int:
+     """Return configured Telegram BotCommand menu cap with safe bounds."""
+     return int(_telegram_command_menu_config()["max_commands"])
+@@ -927,27 +974,25 @@ def _collect_gateway_skill_entries(
          from agent.skill_commands import get_skill_commands
          from tools.skills_tool import SKILLS_DIR
          from agent.skill_utils import get_external_skills_dirs
@@ -1945,7 +2022,7 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..7ee0c205b79855c65292e94572c869a6
                  continue
              skill_name = info.get("name", "")
              if skill_name in _platform_disabled:
-@@ -997,22 +1002,22 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
+@@ -997,22 +1042,25 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
          (menu_commands, hidden_count) where hidden_count is the number of
          commands omitted due to the cap.
      """
@@ -1968,13 +2045,16 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..7ee0c205b79855c65292e94572c869a6
      # Drop the cmd_key — Telegram only needs (name, desc) pairs.
      all_commands.extend((n, d) for n, d, _k in entries)
 -    return all_commands[:max_commands], hidden_count + hidden_core_count
++    if _telegram_command_menu_config()["style"] == "charline":
++        curated = list(_CHARLINE_TELEGRAM_MENU)[:max_commands]
++        return curated, max(0, len(all_commands) - len(curated))
 +    all_commands = _prioritize_telegram_menu_commands(all_commands)
 +    hidden_count += max(0, len(all_commands) - max_commands)
 +    return all_commands[:max_commands], hidden_count
  
  
  def discord_skill_commands(
-@@ -1272,7 +1277,10 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
+@@ -1272,7 +1320,10 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
  #   - refine: on-demand memory/skill review; reached via /hermes refine on
  #     Slack. Added at the 50-cap — a native slot would clamp an existing
  #     native slash.
@@ -2138,7 +2218,7 @@ index 81a56b1b83905214586536feb6cfdab165e9cd48..3501fa43604b6c00bd36e5fd46c3fbe3
    "engines": {
      "node": ">=22.22.0",
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653077ebf62 100644
+index eea8e316ff796bfdf9f35868bf01470fcf776a92..c1b7b84ace12d7a1edd557e4122f52f7e59678ca 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,7 @@ import logging
@@ -2274,7 +2354,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
                          callback_data=f"cl:{clarify_id}:other",
                      )
                  ])
-@@ -5738,6 +5761,532 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5738,6 +5761,539 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.warning("[%s] send_clarify failed: %s", self.name, _redact_telegram_error_text(e))
              return SendResult(success=False, error=_redact_telegram_error_text(e))
  
@@ -2452,6 +2532,8 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
 +        on_action,
 +        owner_user_id: str = "",
 +        project_title: str = "",
++        initial_section: str = "home",
++        initial_items: Optional[list[dict]] = None,
 +        metadata: Optional[Dict[str, Any]] = None,
 +    ) -> SendResult:
 +        """Render Charline navigation with native Telegram buttons."""
@@ -2461,7 +2543,11 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
 +        thread_id = self._metadata_thread_id(metadata)
 +        project = bool(thread_id and str(thread_id) != "1")
 +        text, keyboard = self._render_charline_panel(
-+            menu_id, project=project, project_title=project_title
++            menu_id,
++            initial_section,
++            project=project,
++            project_title=project_title,
++            items=initial_items,
 +        )
 +        try:
 +            reply_to_id = self._reply_to_message_id_for_send(None, metadata)
@@ -2494,6 +2580,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
 +                "created_at": time.monotonic(),
 +                "project": project,
 +                "project_title": str(project_title or ""),
++                "project_items": list(initial_items or []),
 +                "callback": on_action,
 +            }
 +            return SendResult(success=True, message_id=str(message.message_id))
@@ -2807,7 +2894,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
      async def send_model_picker(
          self,
          chat_id: str,
-@@ -6415,6 +6964,516 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6415,6 +6971,516 @@ class TelegramAdapter(BasePlatformAdapter):
          query_thread_id = getattr(query_message, "message_thread_id", None)
          query_user_name = getattr(query.from_user, "first_name", None)
  
@@ -3324,7 +3411,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
          # --- Model picker callbacks ---
          if data.startswith(("mp:", "mpg:", "mpv:", "mm:", "mc:", "mb", "mx", "mg:")):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -6464,7 +7523,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6464,7 +7530,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      await query.answer(text="⛔ You are not authorized to approve commands.")
                      return
  
@@ -3333,7 +3420,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
                  if not session_key:
                      await query.answer(text="This approval has already been resolved.")
                      return
-@@ -6479,7 +7538,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6479,7 +7545,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  # regression follow-up: 60s waits made stale taps common).
                  try:
                      from tools.approval import resolve_gateway_approval
@@ -3344,7 +3431,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
                      logger.info(
                          "Telegram button resolved %d approval(s) for session %s (choice=%s, user=%s)",
                          count, session_key, choice, user_display,
-@@ -6489,6 +7550,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6489,6 +7557,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      count = 0
  
                  if count:
@@ -3352,7 +3439,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
                      # Map choice to human-readable label
                      label_map = {
                          "once": "✅ Approved once",
-@@ -6648,6 +7710,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6648,6 +7717,10 @@ class TelegramAdapter(BasePlatformAdapter):
                  if not session_key:
                      await query.answer(text="This prompt has already been resolved.")
                      return
@@ -3363,7 +3450,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
  
                  user_display = getattr(query.from_user, "first_name", "User")
  
-@@ -6661,7 +7727,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6661,7 +7734,9 @@ class TelegramAdapter(BasePlatformAdapter):
                      flipped = False
                      try:
                          from tools.clarify_gateway import mark_awaiting_text
@@ -3374,7 +3461,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
                      except Exception as exc:
                          logger.warning("[%s] mark_awaiting_text failed: %s", self.name, exc)
  
-@@ -6712,7 +7780,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6712,7 +7787,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  self._clarify_state.pop(clarify_id, None)
                  try:
                      from tools.clarify_gateway import resolve_gateway_clarify
@@ -3385,6 +3472,15 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..d11f309da04052d9b04d77642d853653
                  except Exception as exc:
                      logger.error("[%s] resolve_gateway_clarify failed: %s", self.name, exc)
                      resolved = False
+@@ -8924,6 +10001,8 @@ class TelegramAdapter(BasePlatformAdapter):
+ 
+         event = self._build_message_event(msg, MessageType.COMMAND, update_id=update.update_id)
+         event.text = self._clean_bot_trigger_text(event.text)
++        from hermes_cli.commands import telegram_charline_command_rewrite
++        event.text = telegram_charline_command_rewrite(event.text or "")
+         await self._cache_replied_media(msg, event)
+         event = self._apply_telegram_group_observe_attribution(event)
+         # Telegram clients split messages above 4096 chars into multiple
 diff --git a/run_agent.py b/run_agent.py
 index 63824c6eac56296502d2080d50c0e1dca92a172c..6be3cf3be4c8ff12e8775cd62861381641ecfdf7 100644
 --- a/run_agent.py
@@ -4378,10 +4474,10 @@ index 384932687023d934df99c5c6f20cf471536d7294..f5b6816a183e54307a122e6c0a623851
 -
 diff --git a/tests/gateway/test_telegram_charline_menu.py b/tests/gateway/test_telegram_charline_menu.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..c7242f4b4cc5ac6e37dbc286d7f27032e76bbcfb
+index 0000000000000000000000000000000000000000..c79e8870942c0222ad5fbdfbf160ace61b19e5d7
 --- /dev/null
 +++ b/tests/gateway/test_telegram_charline_menu.py
-@@ -0,0 +1,534 @@
+@@ -0,0 +1,562 @@
 +import asyncio
 +import os
 +from types import SimpleNamespace
@@ -4914,6 +5010,34 @@ index 0000000000000000000000000000000000000000..c7242f4b4cc5ac6e37dbc286d7f27032
 +        runner._handle_agents_command.assert_awaited_once_with(event)
 +        runner._charline_project_items.assert_awaited_once_with(event)
 +        runner._create_telegram_project.assert_awaited_once_with(event, "")
++
++    asyncio.run(run())
++
++
++def test_gateway_charline_shortcuts_reuse_existing_sections():
++    class Adapter:
++        async def send_charline_menu(self, **kwargs):
++            self.kwargs = kwargs
++            return SendResult(success=True, message_id="99")
++
++    async def run():
++        runner = object.__new__(GatewayRunner)
++        adapter = Adapter()
++        runner._adapter_for_source = lambda source: adapter
++        runner._session_key_for_source = lambda source: "telegram:dm:42"
++        runner._thread_metadata_for_source = lambda source, reply: None
++        runner._check_slash_access = lambda source, command: None
++        runner._handle_google_section = AsyncMock(return_value="calendar view")
++        runner._charline_project_items = AsyncMock(return_value=[{"label": "P1"}])
++
++        calendar = MessageEvent(text="/charline calendar", source=_source())
++        assert await runner._handle_charline_command(calendar) == "calendar view"
++        runner._handle_google_section.assert_awaited_once_with(calendar, "calendar")
++
++        projects = MessageEvent(text="/charline projects", source=_source())
++        assert await runner._handle_charline_command(projects) is None
++        assert adapter.kwargs["initial_section"] == "projects"
++        assert adapter.kwargs["initial_items"] == [{"label": "P1"}]
 +
 +    asyncio.run(run())
 diff --git a/tests/gateway/test_telegram_clarify_buttons.py b/tests/gateway/test_telegram_clarify_buttons.py
@@ -5660,10 +5784,18 @@ index c61a706f495a9dedef9e766868d2df8406ff484a..e85c2a33aeac25159e272c492dbd8320
  # ---------------------------------------------------------------------------
 -
 diff --git a/tests/hermes_cli/test_commands.py b/tests/hermes_cli/test_commands.py
-index 580de148bc04d21fdb1983a5f118659c58dac13c..e76ea4e9d8ab19bf93caa06d7f2715756993576a 100644
+index 580de148bc04d21fdb1983a5f118659c58dac13c..282c320057490d0bea98ceed856981995ddce1ae 100644
 --- a/tests/hermes_cli/test_commands.py
 +++ b/tests/hermes_cli/test_commands.py
-@@ -628,6 +628,77 @@ class TestDiscordSkillCmdKeyDispatch:
+@@ -26,6 +26,7 @@ from hermes_cli.commands import (
+     slack_native_slashes,
+     slack_subcommand_map,
+     telegram_bot_commands,
++    telegram_charline_command_rewrite,
+     telegram_menu_commands,
+     telegram_menu_max_commands,
+ )
+@@ -628,6 +629,115 @@ class TestDiscordSkillCmdKeyDispatch:
  class TestTelegramMenuCommands:
      """Integration: telegram_menu_commands enforces the 32-char limit."""
  
@@ -5673,6 +5805,44 @@ index 580de148bc04d21fdb1983a5f118659c58dac13c..e76ea4e9d8ab19bf93caa06d7f271575
 +        assert "agents" not in names
 +        assert resolve_command("tasks").name == "agents"
 +        assert resolve_command("agents").name == "agents"
++
++    def test_charline_style_exposes_only_curated_native_menu(
++        self, tmp_path, monkeypatch,
++    ):
++        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++        (tmp_path / "config.yaml").write_text(
++            "platforms:\n"
++            "  telegram:\n"
++            "    extra:\n"
++            "      command_menu:\n"
++            "        style: charline\n",
++            encoding="utf-8",
++        )
++
++        menu, _hidden = telegram_menu_commands(max_commands=60)
++
++        assert [name for name, _description in menu] == [
++            "charline", "calendar", "mail", "files", "projects",
++            "tasks", "schedules", "memory", "research", "commands",
++        ]
++
++    def test_charline_menu_aliases_rewrite_to_existing_panel_actions(
++        self, tmp_path, monkeypatch,
++    ):
++        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++        (tmp_path / "config.yaml").write_text(
++            "platforms:\n"
++            "  telegram:\n"
++            "    extra:\n"
++            "      command_menu:\n"
++            "        style: charline\n",
++            encoding="utf-8",
++        )
++
++        assert telegram_charline_command_rewrite("/calendar") == "/charline calendar"
++        assert telegram_charline_command_rewrite("/projects") == "/charline projects"
++        assert telegram_charline_command_rewrite("/commands") == "/commands"
++        assert telegram_charline_command_rewrite("/calendar tomorrow") == "/calendar tomorrow"
 +
 +    def test_local_skill_with_native_windows_separators_is_in_menu(
 +        self, tmp_path, monkeypatch,

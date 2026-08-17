@@ -55,6 +55,8 @@ Do not use Drive share/delete as a V1 proof until the installed interface expose
 
 ## Conversational UX gates
 
+The persistent Telegram command picker must show only the ten daily Charline entry points. The complete technical Hermes catalog must remain available through the paginated `/commands` card.
+
 Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 
 1. Confirm Telegram's persistent menu button opens the native command list rather than a Web App, and `/charline` opens one native card with `Календарь`, `Почта`, `Файлы`, `Задачи`, `Проекты`, `Новая задача` and `Новый проект`; category details and `Назад` edit that card, while task/project buttons reuse their existing scoped centers.
