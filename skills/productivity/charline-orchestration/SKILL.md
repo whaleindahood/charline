@@ -57,12 +57,13 @@ Telegram remains one assistant interface. Ordinary direct-message conversation s
 
 - `/background <task>` starts a separate process-local task and returns immediately;
 - `/goal` owns one persistent outcome in the current chat and supports status, pause, resume and clear;
-- `/topic` is opt-in for separate Telegram topic sessions when the user wants visible workstream isolation; use one Telegram topic per independent project, and do not enable topic mode automatically; after explicit opt-in, the root direct message acts as the topic lobby;
+- `/topic` is opt-in for separate Telegram topic sessions when the user wants visible workstream isolation; use one Telegram topic per independent project and do not enable topic mode automatically; General is the permanent main session and the root direct message remains the normal assistant chat;
+- create projects only explicitly with `/projects new [name]` or the `Новый проект` button in `/charline`; never instruct the user to create normal projects through Telegram's All Messages aggregator;
 - `/projects` lists owned Telegram topic projects, marks the current project and shows each project's active-work count without exposing session IDs;
 - `/agents` and `/tasks` open the current-chat task center and show current-chat work only; it edits one Telegram message in place, shows friendly labels, `needs input`, active states and recent results, and keeps unrelated sessions and Gateway service jobs hidden;
 - `/stop` opens the active-work menu with one Stop button per task and a Stop All button.
 
-Keep the ordinary direct-message assistant unchanged until the user opts into topics. Inside a project topic, conversation history, `/goal`, `/background`, `/tasks` and cancellation remain scoped to that project session. Use Kanban only when several workers share dependencies and task state must survive a Gateway or worker restart; conversation topics alone are not a reason to enable it.
+Keep the ordinary direct-message assistant unchanged before and after topic opt-in. Inside a project topic, conversation history, `/goal`, `/background`, `/tasks` and cancellation remain scoped to that project session. A background result returns to its originating session: General work returns to General and project work returns to its exact thread. Each session compacts independently, so a long project does not consume the main chat's context window. Use Kanban only when several workers share dependencies and task state must survive a Gateway or worker restart; conversation topics alone are not a reason to enable it.
 
 ## Cancellation
 

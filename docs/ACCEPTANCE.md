@@ -57,14 +57,14 @@ Do not use Drive share/delete as a V1 proof until the installed interface expose
 
 Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 
-1. Confirm Telegram's persistent menu button opens the native command list rather than a Web App, and `/charline` opens one native card with `Календарь`, `Почта`, `Файлы`, `Задачи`, `Проекты` and `Новая задача`; category details and `Назад` edit that card, while task/project buttons open their existing scoped centers.
+1. Confirm Telegram's persistent menu button opens the native command list rather than a Web App, and `/charline` opens one native card with `Календарь`, `Почта`, `Файлы`, `Задачи`, `Проекты`, `Новая задача` and `Новый проект`; category details and `Назад` edit that card, while task/project buttons reuse their existing scoped centers.
 2. Send a natural-language meeting request without duration; receive one short duration question, then no progress chatter and one complete preview; cancel without a write.
 3. Repeat the request by Russian voice; verify the transcript and cancel at the final confirmation.
 4. Request a busy slot; receive one conflict message with the nearest available start as an exact alternative preview.
 5. Change one field after preview; verify the old confirmation is invalid and a new preview is required.
 6. Separately confirm one sandbox Calendar creation; receive one concise result after exact read-back.
 7. In the ordinary direct-message chat, start two independent bounded tasks in parallel; continue the conversation, inspect only current-chat work through `/agents` with no Gateway service jobs shown, and verify each completion is labelled and separately verified.
-8. Opt into `/topic` separately; verify the root direct message becomes the topic lobby and two topic conversations remain isolated.
+8. Opt into `/topic` separately; verify General remains one permanent main session, `/projects new [name]` and `Новый проект` explicitly create isolated topics, and two project conversations remain isolated from General and each other.
 9. Ask one unrelated general question and verify Charline answers normally without forcing a menu or domain transaction.
 
 ## Release decision

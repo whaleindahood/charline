@@ -43,7 +43,7 @@ index a60e5291b5b5f0915270e43cc3637f2c0f65ff22..6ff302488f2987b29ec00a268d1b0636
          #
          # grok models on xAI's /v1/responses surface have a *native*,
 diff --git a/gateway/run.py b/gateway/run.py
-index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e9728079293b93 100644
+index 83342c39591b100101ab24fdcf59572392af7dec..570ba3140635faa282d775f3c02b44f7a29bea27 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -3029,6 +3029,44 @@ def _is_control_interrupt_message(message: Optional[str]) -> bool:
@@ -108,7 +108,175 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
              # Pause the typing indicator while the agent waits for
              # user approval.  Critical for Slack's Assistant API where
              # assistant_threads_setStatus disables the compose box — the
-@@ -8989,6 +9030,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -6754,18 +6795,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+ 
+     # Telegram's General (pinned top) topic in forum-enabled private chats.
+     # Bot API behavior varies: some clients omit message_thread_id for
+-    # General, others send "1". Treat both as "root" for lobby/lane purposes.
++    # General, others send "1". Treat both as the main session, never a project.
+     _TELEGRAM_GENERAL_TOPIC_IDS = frozenset({"", "1"})
+ 
+-    def _is_telegram_topic_root_lobby(self, source: SessionSource) -> bool:
+-        """True for the main Telegram DM (or General topic) when topic mode has made it a lobby."""
+-        if source.platform != Platform.TELEGRAM or source.chat_type != "dm":
+-            return False
+-        if not self._telegram_topic_mode_enabled(source):
+-            return False
+-        tid = str(source.thread_id or "")
+-        return tid in self._TELEGRAM_GENERAL_TOPIC_IDS
+-
+     def _is_telegram_topic_lane(self, source: SessionSource) -> bool:
+         """True for a user-created Telegram private-chat topic lane."""
+         if source.platform != Platform.TELEGRAM or source.chat_type != "dm":
+@@ -6777,54 +6809,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             return False
+         return True
+ 
+-    _TELEGRAM_LOBBY_REMINDER_COOLDOWN_S = 30.0
+-
+-    def _should_send_telegram_lobby_reminder(self, source: SessionSource) -> bool:
+-        """Rate-limit root-DM lobby reminders to one message per cooldown window.
+-
+-        A user who forgets multi-session mode is enabled and types several
+-        prompts in the root DM would otherwise get a reminder for every
+-        message. Cap it so the first one lands and the rest stay quiet.
+-        """
+-        if not hasattr(self, "_telegram_lobby_reminder_ts"):
+-            self._telegram_lobby_reminder_ts = {}
+-        chat_id = str(source.chat_id or "")
+-        if not chat_id:
+-            return True
+-        import time as _time
+-        now = _time.monotonic()
+-        last = self._telegram_lobby_reminder_ts.get(chat_id, 0.0)
+-        if now - last < self._TELEGRAM_LOBBY_REMINDER_COOLDOWN_S:
+-            return False
+-        self._telegram_lobby_reminder_ts[chat_id] = now
+-        return True
+-
+-    def _telegram_topic_root_lobby_message(self) -> str:
+-        return (
+-            "This main chat is reserved for system commands.\n\n"
+-            "To start a new Hermes chat, open the All Messages topic at the top "
+-            "of this bot interface and send any message there. Telegram will "
+-            "create a new topic for that message; each topic works as an "
+-            "independent Hermes session."
+-        )
+-
+-    def _telegram_topic_root_new_message(self) -> str:
+-        return (
+-            "To start a new parallel Hermes chat, open the All Messages topic "
+-            "at the top of this bot interface and send any message there. "
+-            "Telegram will create a new topic for it.\n\n"
+-            "Each topic is an independent Hermes session. Use /new inside an "
+-            "existing topic only if you want to replace that topic's current session."
+-        )
+ 
+     def _telegram_topic_new_header(self, source: SessionSource) -> Optional[str]:
+         if not self._is_telegram_topic_lane(source):
+             return None
+         return (
+             "Started a new Hermes session in this topic.\n\n"
+-            "Tip: for parallel work, open All Messages and send a message there "
+-            "to create a separate topic instead of using /new here. /new replaces "
+-            "the session attached to the current topic."
++            "Use /projects new [name] or the New Project button in /charline "
++            "to create another project. /new only replaces the session attached "
++            "to this topic."
+         )
+ 
+     def _record_telegram_topic_binding(
+@@ -6872,87 +6865,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+                 "telegram topic binding refresh failed (%s)", reason, exc_info=True,
+             )
+ 
+-    def _recover_telegram_topic_thread_id(
+-        self,
+-        source: SessionSource,
+-    ) -> Optional[str]:
+-        """Pin DM-topic routing to the user's last-active topic.
+-
+-        Telegram can omit ``message_thread_id`` or surface General (``1``)
+-        for some topic-mode DM replies. In those lobby-shaped cases, keep the
+-        conversation attached to the user's most-recent bound topic.
+-
+-        Do not rewrite a non-lobby, previously-unbound thread id: a newly
+-        created Telegram DM topic is also "unknown" until the first inbound
+-        message is recorded, and rewriting it would send that brand-new topic's
+-        answer into an older lane. Returns None to leave the source alone.
+-        """
+-        if (
+-            source.platform != Platform.TELEGRAM
+-            or source.chat_type != "dm"
+-            or not source.chat_id
+-            or not source.user_id
+-            or not self._telegram_topic_mode_enabled(source)
+-        ):
+-            return None
+-        inbound = str(source.thread_id or "")
+-        is_lobby = not inbound or inbound in self._TELEGRAM_GENERAL_TOPIC_IDS
+-        if not is_lobby:
+-            # A non-lobby, unknown thread_id is most likely the first message in
+-            # a brand-new Telegram DM topic. Preserve it so it can be recorded
+-            # as a new independent lane below instead of hijacking the latest
+-            # existing topic binding.
+-            return None
+-        session_db = getattr(self, "_session_db", None)
+-        if session_db is None:
+-            return None
+-        # Runs off-loop (always via asyncio.to_thread); use the sync handle.
+-        session_db = getattr(session_db, "_db", session_db)
+-        try:
+-            bindings = session_db.list_telegram_topic_bindings_for_chat(
+-                chat_id=str(source.chat_id),
+-            )
+-        except Exception:
+-            logger.debug("topic-recover: read failed", exc_info=True)
+-            return None
+-        if not bindings:
+-            return None
+-        user_id = str(source.user_id)
+-        for b in bindings:  # newest-first
+-            if str(b.get("user_id") or "") == user_id:
+-                recovered = str(b.get("thread_id") or "")
+-                if recovered and recovered != inbound:
+-                    return recovered
+-                return None
+-        return None
+-
+     def _normalize_source_for_session_key(
+         self,
+         source: SessionSource,
+     ) -> SessionSource:
+-        """Apply Telegram DM topic recovery to a source for session-key purposes.
+-
+-        ``_handle_message_with_agent`` rewrites ``source.thread_id`` via
+-        ``_recover_telegram_topic_thread_id`` *before* deriving the session
+-        key for a normal message turn (a lobby/stripped reply gets pinned to
+-        the user's last-active topic).  Session-scoped command handlers like
+-        ``/model`` and ``/reasoning`` derive their override key from the raw
+-        inbound ``event.source``, which skips that recovery — so the override
+-        is stored under a different key than the next message turn reads,
+-        and the override is silently dropped on Telegram forum topics and
+-        after compression session splits (#30479).
+-
+-        Returns a recovery-normalized copy when a rewrite applies, otherwise
+-        the original source unchanged.  Always derive the override storage key
+-        from the result so storage and read use an identical key.
+-        """
+-        try:
+-            recovered = self._recover_telegram_topic_thread_id(source)
+-        except Exception:
+-            return source
+-        if recovered is None:
+-            return source
+-        return dataclasses.replace(source, thread_id=recovered)
++        """Return the source used for deterministic session-key construction."""
++        return source
+ 
+     def _resolve_session_agent_runtime(
+         self,
+@@ -8989,6 +8907,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          if getattr(event, "internal", False):
              return False
  
@@ -136,7 +304,31 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
          _busy_state = self._peek_session_state(session_key)
          running_agent = _busy_state.turn.agent if _busy_state else None
  
-@@ -14296,6 +14358,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11214,7 +11153,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             _set_reaction = getattr(adapter, "set_reaction_handler", None)
+             if callable(_set_reaction):
+                 _set_reaction(self._handle_reaction_event)
+-            adapter.set_topic_recovery_fn(self._recover_telegram_topic_thread_id)
+             adapter.set_authorization_check(self._make_adapter_auth_check(adapter.platform))
+             adapter._busy_text_mode = self._busy_text_mode
+             
+@@ -12597,7 +12535,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+                     _set_reaction = getattr(adapter, "set_reaction_handler", None)
+                     if callable(_set_reaction):
+                         _set_reaction(self._handle_reaction_event)
+-                    adapter.set_topic_recovery_fn(self._recover_telegram_topic_thread_id)
+                     adapter.set_authorization_check(self._make_adapter_auth_check(adapter.platform))
+                     adapter._busy_text_mode = self._busy_text_mode
+ 
+@@ -13566,7 +13503,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         _set_reaction = getattr(adapter, "set_reaction_handler", None)
+         if callable(_set_reaction):
+             _set_reaction(self._handle_reaction_event)
+-        adapter.set_topic_recovery_fn(self._recover_telegram_topic_thread_id)
+         adapter.set_authorization_check(
+             self._make_adapter_auth_check(platform, profile_name=profile_name)
+         )
+@@ -14296,6 +14232,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  "approve": self._handle_approve_command,
                  "deny": self._handle_deny_command,
                  "agents": self._handle_agents_command,
@@ -145,7 +337,7 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
                  "background": self._handle_background_command,
                  "kanban": self._handle_kanban_command,
                  "subgoal": self._handle_subgoal_command,
-@@ -14337,6 +14401,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14337,6 +14275,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          return format_status_text()
  
      async def _busy_stop_command(self, event: MessageEvent, quick_key: str, source):
@@ -155,7 +347,7 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
          # /stop must hard-kill the session when an agent is running.
          # A soft interrupt (agent.interrupt()) doesn't help when the agent
          # is truly hung — the executor thread is blocked and never checks
-@@ -14791,7 +14858,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14791,7 +14732,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # with an empty response.
              if _raw_clarify_reply and not _raw_clarify_reply.startswith("/"):
                  _resolved = _clarify_mod.resolve_text_response_for_session(
@@ -166,7 +358,7 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
                  )
                  if _resolved:
                      logger.info(
-@@ -14966,6 +15035,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14966,6 +14909,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      event, _cmd_def_inner, _quick_key, source,
                  )
  
@@ -183,7 +375,16 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
              if event.message_type == MessageType.PHOTO:
                  logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
                  adapter = self._adapter_for_source(source)
-@@ -15251,6 +15330,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -15234,8 +15187,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+                     break
+ 
+         if canonical == "new":
+-            if await asyncio.to_thread(self._is_telegram_topic_root_lobby, source):
+-                return self._telegram_topic_root_new_message()
+             async def _do_reset():
+                 return await self._handle_reset_command(event)
+             return await self._maybe_confirm_destructive_slash(
+@@ -15251,6 +15202,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
  
          if canonical == "topic":
              return await self._handle_topic_command(event)
@@ -196,11 +397,243 @@ index 83342c39591b100101ab24fdcf59572392af7dec..05858b6053557ce1a8c2314790e97280
          
          if canonical == "help":
              return await self._handle_help_command(event)
+@@ -15807,15 +15764,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         # No bare text matching — "yes" in normal conversation must not trigger
+         # execution of a dangerous command.
+ 
+-        if not is_internal and await asyncio.to_thread(
+-            self._is_telegram_topic_root_lobby, source
+-        ):
+-            # Debounce the lobby reminder so a user who forgets about
+-            # topic mode and fires ten prompts doesn't get ten copies.
+-            if self._should_send_telegram_lobby_reminder(source):
+-                return self._telegram_topic_root_lobby_message()
+-            return None
+-
+         # ── External-drain new-turn gate (Phase 2) ────────────────────
+         # When NAS has engaged an external drain (.drain_request.json present,
+         # observed by _drain_control_watcher), refuse to START a new turn so
+@@ -16480,22 +16428,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
+         )
+ 
+-        # Get or create session
+-        # Topic-mode DMs: rewrite a stale/foreign thread_id to the user's
+-        # last-active topic so a cross-topic Reply or stripped plain reply
+-        # doesn't fragment the conversation across sessions.
+-        recovered = await asyncio.to_thread(self._recover_telegram_topic_thread_id, source)
+-        if recovered is not None:
+-            logger.info(
+-                "telegram topic recovery: chat=%s user=%s %r -> %s",
+-                source.chat_id, source.user_id, source.thread_id, recovered,
+-            )
+-            source = dataclasses.replace(source, thread_id=recovered)
+-            try:
+-                event.source = source
+-            except Exception:
+-                pass
+-
++        # General and project topics map directly to deterministic session keys.
+         session_entry = await self.async_session_store.get_or_create_session(source)
+         session_key = session_entry.session_key
+         pinned_session_id = str(
+@@ -19923,47 +19856,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             "allows_users_to_create_topics": _field("allows_users_to_create_topics"),
+         }
+ 
+-    async def _ensure_telegram_system_topic(self, source: SessionSource) -> None:
+-        """Create/pin the managed System topic after /topic activation when possible."""
+-        adapter = self._adapter_for_source(source)
+-        if adapter is None or not source.chat_id:
+-            return
+-
+-        thread_id = None
+-        create_topic = getattr(adapter, "_create_dm_topic", None)
+-        if callable(create_topic):
+-            try:
+-                thread_id = await create_topic(int(source.chat_id), "System")
+-            except Exception:
+-                logger.debug("Failed to create Telegram System topic", exc_info=True)
+-        if not thread_id:
+-            return
+-
+-        message_id = None
+-        try:
+-            send_result = await adapter.send(
+-                source.chat_id,
+-                "System topic for Hermes commands and status.",
+-                metadata={"thread_id": str(thread_id)},
+-            )
+-            message_id = getattr(send_result, "message_id", None)
+-        except Exception:
+-            logger.debug("Failed to send Telegram System topic intro", exc_info=True)
+-        if not message_id:
+-            return
+-
+-        bot = getattr(adapter, "_bot", None)
+-        if bot is None or not hasattr(bot, "pin_chat_message"):
+-            return
+-        try:
+-            await bot.pin_chat_message(
+-                chat_id=int(source.chat_id),
+-                message_id=int(message_id),
+-                disable_notification=True,
+-            )
+-        except Exception:
+-            logger.debug("Failed to pin Telegram System topic intro", exc_info=True)
+-
+     async def _send_telegram_topic_setup_image(self, source: SessionSource) -> None:
+         """Send the bundled BotFather Threads Settings screenshot when available."""
+         adapter = self._adapter_for_source(source)
+@@ -20396,7 +20288,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+ 
+     def _telegram_topic_help_text(self) -> str:
+         return (
+-            "/topic — enable multi-session DM mode (one bot, many parallel chats)\n"
++            "/topic — enable project topics while keeping General as the main chat\n"
+             "\n"
+             "Usage:\n"
+             "  /topic             Enable topic mode, or show status if already on\n"
+@@ -20406,14 +20298,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             "\n"
+             "How it works:\n"
+             "1. Run /topic once in this DM — Hermes checks BotFather Threads\n"
+-            "   Settings are enabled and flips on multi-session mode.\n"
+-            "2. Tap All Messages at the top of the bot and send any message.\n"
+-            "   Telegram creates a new topic for that message; each topic is\n"
+-            "   an independent Hermes session (fresh history, fresh context).\n"
+-            "3. The root DM becomes a system lobby — send /topic, /status,\n"
+-            "   /help, /usage there. Normal prompts go in a topic.\n"
+-            "4. /new inside a topic resets just that topic's session.\n"
+-            "5. /topic <id> inside a topic restores an old session into it."
++            "   Settings and enables independent project sessions.\n"
++            "2. General stays your permanent main assistant conversation.\n"
++            "3. Create projects explicitly with /projects new [name] or the\n"
++            "   New Project button in /charline.\n"
++            "4. Each project topic has independent history and context.\n"
++            "5. /new resets only the current General or project session.\n"
++            "6. /topic <id> inside a project restores an old session into it."
+         )
+ 
+     async def _disable_telegram_topic_mode_for_chat(self, source: SessionSource) -> str:
+@@ -20441,15 +20332,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             return f"Failed to disable topic mode: {exc}"
+         # Reset per-chat debounce state so the user doesn't see a stale
+         # cooldown on the next activation.
+-        for attr in ("_telegram_lobby_reminder_ts", "_telegram_capability_hint_ts"):
+-            store = getattr(self, attr, None)
+-            if isinstance(store, dict):
+-                store.pop(chat_id, None)
++        store = getattr(self, "_telegram_capability_hint_ts", None)
++        if isinstance(store, dict):
++            store.pop(chat_id, None)
+         return (
+             "Multi-session topic mode is now OFF for this chat.\n\n"
+-            "Existing topics in Telegram aren't removed — they'll just stop "
+-            "being gated as independent sessions. The root DM works as a "
+-            "normal Hermes chat again. Run /topic to re-enable later."
++            "Existing topics in Telegram aren't removed. General remains the "
++            "normal assistant chat. Run /topic to re-enable independent project "
++            "sessions later."
+         )
+ 
+ 
+@@ -20457,9 +20347,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         lines = [
+             "Telegram multi-session topics are enabled.",
+             "",
+-            "To create a new Hermes chat, open All Messages at the top of this "
+-            "bot interface and send any message there. Telegram will create a "
+-            "new topic for it.",
++            "General is your permanent main assistant chat. Create a project "
++            "explicitly with /projects new [name] or the New Project button "
++            "in /charline.",
+             "",
+         ]
+         try:
+@@ -20485,7 +20375,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             lines.extend([
+                 "",
+                 "To restore one:",
+-                "1. Create or open a topic. To create a new one, open All Messages and send any message there.",
++                "1. Create a project with /projects new, then open its topic.",
+                 "2. Send /topic <session-id> inside that topic.",
+                 f"Example: Send /topic {sessions[0].get('id')} inside a topic.",
+             ])
+@@ -20494,7 +20384,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+                 "No previous unlinked Telegram sessions found.",
+                 "",
+                 "To restore a previous session later:",
+-                "1. Create or open a topic. To create a new one, open All Messages and send any message there.",
++                "1. Create a project with /projects new, then open its topic.",
+                 "2. Send /topic <session-id> inside that topic.",
+             ])
+         return "\n".join(lines)
+diff --git a/gateway/session.py b/gateway/session.py
+index fa019133c0584ea4541a14065aad908e7ce7ba94..3a0744f09c5b0021d958316b17dadfc0d819c4bc 100644
+--- a/gateway/session.py
++++ b/gateway/session.py
+@@ -1102,6 +1102,11 @@ def build_session_key(
+     )
+     if source.chat_type == "dm":
+         dm_chat_id = source.chat_id
++        dm_thread_id = source.thread_id
++        if source.platform == Platform.TELEGRAM and str(dm_thread_id or "") == "1":
++            # Telegram may encode the permanent General topic as thread 1 or
++            # omit the thread id. Both forms are the same main conversation.
++            dm_thread_id = None
+         if source.platform == Platform.WHATSAPP:
+             dm_chat_id = canonical_whatsapp_identifier(source.chat_id)
+ 
+@@ -1110,8 +1115,8 @@ def build_session_key(
+             dm_parts.append(slack_scope_id)
+         if dm_chat_id:
+             dm_parts.append(dm_chat_id)
+-            if source.thread_id:
+-                dm_parts.append(source.thread_id)
++            if dm_thread_id:
++                dm_parts.append(dm_thread_id)
+             return ":".join(str(part) for part in dm_parts)
+         # No chat_id — fall back to the sender's own identifier before the
+         # bare per-platform sink.  Without this, every DM from every user that
+@@ -1127,11 +1132,11 @@ def build_session_key(
+             )
+         if dm_participant_id:
+             dm_parts.append(str(dm_participant_id))
+-            if source.thread_id:
+-                dm_parts.append(source.thread_id)
++            if dm_thread_id:
++                dm_parts.append(dm_thread_id)
+             return ":".join(str(part) for part in dm_parts)
+-        if source.thread_id:
+-            dm_parts.append(source.thread_id)
++        if dm_thread_id:
++            dm_parts.append(dm_thread_id)
+         return ":".join(str(part) for part in dm_parts)
+ 
+     participant_id = source.user_id_alt or source.user_id
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac33d564c7d 100644
+index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..7b45c9d9327e058fa777f8bf53fbbee02c1e71fc 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
-@@ -1194,19 +1194,62 @@ class GatewaySlashCommandsMixin:
+@@ -19,13 +19,15 @@ import asyncio
+ import dataclasses
+ import hashlib
+ import inspect
++import json
+ import logging
+ import os
+ import re
+ import shlex
++import shutil
+ import sys
+ import time
+-from datetime import datetime
++from datetime import datetime, timedelta
+ from pathlib import Path
+ from typing import Any, Optional, Union
+ 
+@@ -1194,19 +1196,524 @@ class GatewaySlashCommandsMixin:
              return True
          return await self._resume_target_allowed(source, sid, allow_override=False)
  
@@ -212,7 +645,24 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +            getattr(type(adapter), "send_charline_menu", None) if adapter else None
 +        )
 +        if callable(send_menu):
-+            async def _on_action(action: str) -> Union[str, None]:
++            project_title = ""
++            if event.source.thread_id and str(event.source.thread_id) != "1":
++                project_title = str(event.source.chat_topic or "Проект")
++                try:
++                    session_entry = await self.async_session_store.get_or_create_session(
++                        event.source
++                    )
++                    if getattr(self, "_session_db", None):
++                        project_title = str(
++                            await self._session_db.get_session_title(session_entry.session_id)
++                            or project_title
++                        )
++                except Exception:
++                    logger.debug("Could not resolve Charline project title", exc_info=True)
++
++            async def _on_action(
++                action: str, payload: Optional[dict] = None
++            ) -> Union[str, dict, None]:
 +                if action == "tasks":
 +                    denied = self._check_slash_access(event.source, "agents")
 +                    if denied:
@@ -222,13 +672,127 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +                    denied = self._check_slash_access(event.source, "projects")
 +                    if denied:
 +                        return denied
-+                    return await self._handle_projects_command(event)
++                    return {
++                        "section": "projects",
++                        "items": await self._charline_project_items(event),
++                    }
++                if action in {"project_summary", "project_tasks"} and payload:
++                    denied = self._check_slash_access(
++                        event.source, "agents" if action == "project_tasks" else "projects"
++                    )
++                    if denied:
++                        return denied
++                    thread_id = str(payload.get("thread_id") or "")
++                    session_db = getattr(self, "_session_db", None)
++                    binding = (
++                        await session_db.get_telegram_topic_binding(
++                            chat_id=str(event.source.chat_id), thread_id=thread_id
++                        )
++                        if session_db and thread_id else None
++                    )
++                    if (
++                        not binding
++                        or str(binding.get("user_id") or "") != str(event.source.user_id or "")
++                    ):
++                        return "Проект больше недоступен. Обновите панель."
++                    target_source = dataclasses.replace(
++                        event.source,
++                        thread_id=thread_id,
++                        chat_topic=str(payload.get("label") or "Проект"),
++                    )
++                    target_event = dataclasses.replace(event, source=target_source)
++                    if action == "project_tasks":
++                        await self._handle_agents_command(target_event)
++                        return f"Задачи открыты в проекте «{payload.get('label') or 'Проект'}»."
++                    summary_event = dataclasses.replace(
++                        target_event,
++                        text=(
++                            "Подготовь краткую сводку текущего проекта: цель, подтверждённые "
++                            "решения, выполненное, активные задачи, блокеры и следующие шаги. "
++                            "Используй только контекст этой проектной сессии и ничего не изменяй."
++                        ),
++                        raw_message=None,
++                        message_id=None,
++                        reply_to_message_id=None,
++                        reply_to_text=None,
++                        metadata={**event.metadata, "charline_action": "project_summary"},
++                    )
++                    await adapter.handle_message(summary_event)
++                    return f"Сводка готовится в проекте «{payload.get('label') or 'Проект'}»."
++                if action == "new_project":
++                    denied = self._check_slash_access(event.source, "projects")
++                    if denied:
++                        return denied
++                    return await self._create_telegram_project(event, "")
++                if action == "today":
++                    return await self._handle_today_command(event)
++                if action in {"calendar", "mail", "files"}:
++                    return await self._handle_google_section(event, action)
++                if action == "automations":
++                    return await self._handle_automations_command(event)
++                if action == "memory_pending":
++                    return await self._handle_memory_command(event)
++                if action == "memory_entries":
++                    return {
++                        "section": "memory_entries",
++                        "items": self._charline_memory_items(),
++                    }
++                if action == "memory_remove" and payload:
++                    from tools.memory_tool import load_on_disk_store
++
++                    target = str(payload.get("target") or "")
++                    content = str(payload.get("content") or "")
++                    store = load_on_disk_store()
++                    entries = store.user_entries if target == "user" else store.memory_entries
++                    if content not in entries:
++                        return {
++                            "section": "memory_entries",
++                            "items": self._charline_memory_items(),
++                            "notice": "Запись уже удалена или изменилась.",
++                        }
++                    result = store.remove(target, content)
++                    verified = load_on_disk_store()
++                    remaining = (
++                        verified.user_entries if target == "user" else verified.memory_entries
++                    )
++                    return {
++                        "section": "memory_entries",
++                        "items": self._charline_memory_items(),
++                        "notice": (
++                            "Запись удалена."
++                            if result.get("success") and content not in remaining
++                            else "Не удалось подтвердить удаление."
++                        ),
++                    }
++                if action == "services":
++                    return await self._handle_services_command(event)
++                if action == "advanced_commands":
++                    return await self._handle_commands_command(event)
++                if action == "project_summary":
++                    if not event.source.thread_id or str(event.source.thread_id) == "1":
++                        return "Сводка проекта доступна внутри его темы."
++                    summary_event = dataclasses.replace(
++                        event,
++                        text=(
++                            "Подготовь краткую сводку текущего проекта: цель, подтверждённые "
++                            "решения, выполненное, активные задачи, блокеры и следующие шаги. "
++                            "Используй только контекст этой проектной сессии; не выполняй внешних записей."
++                        ),
++                        raw_message=None,
++                        message_id=None,
++                        reply_to_message_id=None,
++                        reply_to_text=None,
++                        metadata={**event.metadata, "charline_action": "project_summary"},
++                    )
++                    await adapter.handle_message(summary_event)
++                    return None
 +                return None
 +
 +            result = await adapter.send_charline_menu(
 +                chat_id=event.source.chat_id,
 +                session_key=self._session_key_for_source(event.source),
 +                owner_user_id=str(event.source.user_id or ""),
++                project_title=project_title,
 +                on_action=_on_action,
 +                metadata=self._thread_metadata_for_source(
 +                    event.source, self._reply_anchor_for_event(event)
@@ -244,6 +808,337 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +            "• Проекты в темах Telegram\n\n"
 +            "Напишите задачу обычными словами."
 +        )
++
++    async def _charline_project_items(self, event: MessageEvent) -> list[dict]:
++        """Return only this Telegram user's projects for native UI cards."""
++        session_db = getattr(self, "_session_db", None)
++        if not session_db:
++            return []
++        rows = await session_db.list_telegram_topic_bindings_for_chat(
++            chat_id=str(event.source.chat_id)
++        )
++        items = []
++        for row in rows:
++            if str(row.get("user_id") or "") != str(event.source.user_id or ""):
++                continue
++            session_id = str(row.get("session_id") or "")
++            thread_id = str(row.get("thread_id") or "")
++            if not session_id or not thread_id:
++                continue
++            title = await session_db.get_session_title(session_id)
++            items.append({
++                "label": " ".join(str(title or f"Проект {thread_id}").split()),
++                "thread_id": thread_id,
++                "session_id": session_id,
++                "session_key": str(row.get("session_key") or ""),
++                "active": len(self._collect_stop_menu_items(
++                    str(row.get("session_key") or ""), session_id
++                )),
++                "current": thread_id == str(event.source.thread_id or ""),
++            })
++        return items
++
++    @staticmethod
++    def _charline_memory_items() -> list[dict]:
++        """Read the existing Hermes memory store; it has no date metadata."""
++        from tools.memory_tool import load_on_disk_store
++
++        store = load_on_disk_store()
++        return [
++            *({"target": "user", "content": entry, "source": "Обо мне"}
++              for entry in store.user_entries),
++            *({"target": "memory", "content": entry, "source": "Заметка ассистента"}
++              for entry in store.memory_entries),
++        ]
++
++    async def _handle_automations_command(self, event: MessageEvent) -> Union[str, None]:
++        """Open a Telegram view over Hermes' existing cronjob engine."""
++        adapter = self._adapter_for_source(event.source)
++        send_menu = getattr(type(adapter), "send_automation_menu", None) if adapter else None
++        if not callable(send_menu):
++            return (
++                "Расписания управляются обычным текстом. Например: "
++                "«Каждый будний день в 8:30 присылай план дня»."
++            )
++
++        from tools.cronjob_tools import cronjob
++
++        def _call(action: str, **kwargs: Any) -> dict:
++            try:
++                return json.loads(cronjob(action=action, **kwargs))
++            except Exception as exc:
++                logger.warning("Cronjob UI action failed: %s", exc)
++                return {"success": False, "error": str(exc)}
++
++        async def _list_jobs() -> list[dict]:
++            result = await asyncio.to_thread(
++                _call, "list", include_disabled=True
++            )
++            return list(result.get("jobs") or []) if result.get("success") else []
++
++        session_entry = await self.async_session_store.get_or_create_session(event.source)
++
++        async def _on_action(action: str, job_id: str) -> dict:
++            notice = ""
++            detail = ""
++            if action == "history":
++                from cron.executions import list_executions
++
++                records = await asyncio.to_thread(list_executions, limit=20)
++                current_jobs = await _list_jobs()
++                names = {
++                    str(job.get("job_id") or ""): str(job.get("name") or "Расписание")
++                    for job in current_jobs
++                }
++                lines = ["## История расписаний", ""]
++                if not records:
++                    lines.append("Запусков пока нет.")
++                for record in records[:20]:
++                    name = names.get(str(record.get("job_id") or ""), "Удалённое расписание")
++                    status = str(record.get("status") or "unknown")
++                    claimed_at = str(record.get("claimed_at") or "")[:16].replace("T", " ")
++                    lines.append(f"- {name} · {status} · {claimed_at}")
++                detail = "\n".join(lines)
++            elif action != "refresh":
++                kwargs: dict[str, Any] = {"job_id": job_id}
++                if action == "run":
++                    kwargs["session_id"] = session_entry.session_id
++                result = await asyncio.to_thread(_call, action, **kwargs)
++                notice = (
++                    "Готово."
++                    if result.get("success")
++                    else "Не удалось выполнить действие."
++                )
++            return {"jobs": await _list_jobs(), "notice": notice, "detail": detail}
++
++        result = await adapter.send_automation_menu(
++            chat_id=event.source.chat_id,
++            jobs=await _list_jobs(),
++            owner_user_id=str(event.source.user_id or ""),
++            on_action=_on_action,
++            metadata=self._thread_metadata_for_source(
++                event.source, self._reply_anchor_for_event(event)
++            ),
++        )
++        if result.success:
++            return None
++        return "Не удалось открыть расписания. Попробуйте позже."
++
++    async def _run_google_read(self, *args: str) -> object:
++        """Run one fixed read-only command through the bundled Google skill."""
++        google_api = (
++            Path(__file__).resolve().parents[1]
++            / "skills" / "productivity" / "google-workspace" / "scripts" / "google_api.py"
++        )
++        for attempt in range(2):
++            process = None
++            try:
++                process = await asyncio.create_subprocess_exec(
++                    sys.executable,
++                    str(google_api),
++                    *args,
++                    stdout=asyncio.subprocess.PIPE,
++                    stderr=asyncio.subprocess.PIPE,
++                )
++                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=45)
++                if process.returncode == 0:
++                    return json.loads(stdout.decode("utf-8", errors="replace"))
++                return None
++            except asyncio.TimeoutError:
++                if process and process.returncode is None:
++                    process.kill()
++                    await process.communicate()
++                return None
++            except (OSError, json.JSONDecodeError):
++                if attempt:
++                    return None
++        return None
++
++    @staticmethod
++    def _calendar_lines(items: object, *, empty: str) -> list[str]:
++        if not isinstance(items, list):
++            return ["Google Calendar недоступен."]
++        if not items:
++            return [empty]
++        lines = []
++        for item in items[:10]:
++            title = " ".join(str(item.get("summary") or "Без названия").split())
++            start = str(item.get("start") or "")
++            try:
++                parsed = datetime.fromisoformat(start.replace("Z", "+00:00"))
++                when = (
++                    f"{parsed.strftime('%d.%m')} · весь день"
++                    if "T" not in start
++                    else parsed.astimezone().strftime("%d.%m %H:%M")
++                )
++            except ValueError:
++                when = start or "время не указано"
++            lines.append(f"- {when} — {title}")
++        return lines
++
++    async def _handle_today_command(self, event: MessageEvent) -> str:
++        """Build a compact read-only day view from the bundled Google skill."""
++
++        now = datetime.now().astimezone()
++        tomorrow = (now + timedelta(days=1)).replace(
++            hour=0, minute=0, second=0, microsecond=0
++        )
++        def _list_schedules() -> list[dict]:
++            try:
++                from tools.cronjob_tools import cronjob
++
++                result = json.loads(cronjob(action="list", include_disabled=False))
++                return list(result.get("jobs") or []) if result.get("success") else []
++            except Exception:
++                logger.debug("Could not load schedules for Today", exc_info=True)
++                return []
++
++        calendar_result, mail_result, schedules = await asyncio.gather(
++            self._run_google_read(
++                "calendar", "list",
++                "--start", now.isoformat(),
++                "--end", tomorrow.isoformat(),
++                "--max", "10",
++            ),
++            self._run_google_read(
++                "gmail", "search", "is:unread (is:important OR newer_than:7d)", "--max", "5"
++            ),
++            asyncio.to_thread(_list_schedules),
++        )
++
++        session_entry = await self.async_session_store.get_or_create_session(event.source)
++        active = len(self._collect_stop_menu_items(
++            session_entry.session_key, session_entry.session_id
++        ))
++        projects = []
++        if str(event.source.thread_id or "") in {"", "1"}:
++            projects = await self._charline_project_items(event)
++            active += sum(int(item.get("active") or 0) for item in projects)
++
++        from tools.approval import has_blocking_approval
++        from tools.clarify_gateway import has_pending as has_pending_clarify
++        from tools import write_approval
++
++        pending = int(has_blocking_approval(session_entry.session_key))
++        pending += int(has_pending_clarify(session_entry.session_key))
++        for project_item in projects:
++            project_key = str(project_item.get("session_key") or "")
++            if project_key:
++                pending += int(has_blocking_approval(project_key))
++                pending += int(has_pending_clarify(project_key))
++        pending += write_approval.pending_count(write_approval.MEMORY)
++
++        lines = [
++            f"## Сегодня · {now.strftime('%d.%m')}",
++            "",
++            f"Активных задач: {active}",
++            f"Ожидают решения: {pending}",
++        ]
++        upcoming = sorted(
++            (job for job in schedules if job.get("next_run_at")),
++            key=lambda job: str(job.get("next_run_at") or ""),
++        )[:3]
++        lines.extend(["", "### Ближайшие расписания"])
++        if not upcoming:
++            lines.append("Запланированных запусков нет.")
++        for job in upcoming:
++            name = " ".join(str(job.get("name") or "Расписание").split())
++            raw_next = str(job.get("next_run_at") or "")
++            try:
++                next_run = datetime.fromisoformat(raw_next.replace("Z", "+00:00"))
++                when = next_run.astimezone().strftime("%d.%m %H:%M")
++            except ValueError:
++                when = raw_next[:16].replace("T", " ")
++            lines.append(f"- {when} — {name}")
++        lines.extend(["", "### Календарь"])
++        lines.extend(self._calendar_lines(calendar_result, empty="Событий до конца дня нет."))
++
++        lines.extend(["", "### Почта"])
++        if isinstance(mail_result, list):
++            if not mail_result:
++                lines.append("Важных непрочитанных писем нет.")
++            for item in mail_result[:5]:
++                subject = " ".join(str(item.get("subject") or "Без темы").split())
++                sender = " ".join(str(item.get("from") or "Неизвестный отправитель").split())
++                lines.append(f"- {subject} — {sender}")
++        else:
++            lines.append("Gmail недоступен.")
++        return "\n".join(lines)
++
++    async def _handle_google_section(self, event: MessageEvent, section: str) -> str:
++        """Open one useful read-only Google view; writes remain conversational."""
++        if section == "calendar":
++            now = datetime.now().astimezone()
++            end = now + timedelta(days=7)
++            result = await self._run_google_read(
++                "calendar", "list", "--start", now.isoformat(),
++                "--end", end.isoformat(), "--max", "10",
++            )
++            lines = ["## Календарь", ""]
++            lines.extend(self._calendar_lines(result, empty="На ближайшие семь дней событий нет."))
++            lines.extend(["", "Чтобы создать или изменить встречу, опишите её обычным сообщением."])
++            return "\n".join(lines)
++        if section == "mail":
++            result = await self._run_google_read(
++                "gmail", "search", "is:unread", "--max", "10"
++            )
++            lines = ["## Непрочитанная почта", ""]
++            if isinstance(result, list):
++                if not result:
++                    lines.append("Непрочитанных писем нет.")
++                for item in result[:10]:
++                    subject = " ".join(str(item.get("subject") or "Без темы").split())
++                    sender = " ".join(str(item.get("from") or "Неизвестный отправитель").split())
++                    lines.append(f"- {subject} — {sender}")
++            else:
++                lines.append("Gmail недоступен.")
++            lines.extend(["", "Для поиска или подготовки ответа напишите запрос обычным сообщением."])
++            return "\n".join(lines)
++
++        result = await self._run_google_read(
++            "drive", "search", "trashed = false", "--raw-query", "--max", "10"
++        )
++        lines = ["## Файлы", ""]
++        if isinstance(result, list):
++            if not result:
++                lines.append("Файлы не найдены.")
++            for item in result[:10]:
++                name = " ".join(str(item.get("name") or "Без названия").split())
++                modified = str(item.get("modifiedTime") or "")[:10]
++                link = str(item.get("webViewLink") or "")
++                suffix = f" · {modified}" if modified else ""
++                lines.append(f"- {name}{suffix}")
++                if link:
++                    lines.append(f"  {link}")
++        else:
++            lines.append("Google Drive недоступен.")
++        lines.extend(["", "Для поиска или создания документа напишите запрос обычным сообщением."])
++        return "\n".join(lines)
++
++    async def _handle_services_command(self, event: MessageEvent) -> str:
++        """Show connection presence without reading credential contents."""
++        from gateway.run import _hermes_home
++
++        connected = sorted(platform.value for platform in self.adapters)
++        failed = getattr(self, "_failed_platforms", {}) or {}
++        google_token = _hermes_home / "google_token.json"
++        google_client = _hermes_home / "google_client_secret.json"
++        lines = [
++            "## Сервисы",
++            "",
++            f"- Gateway: {', '.join(connected) if connected else 'нет подключённых платформ'}",
++            f"- Google Workspace: {'настроен' if google_token.exists() and google_client.exists() else 'требуется подключение'}",
++            f"- Google Workspace CLI: {'доступен' if shutil.which('gws') else 'используется Python API'}",
++            f"- Browser: {'доступен' if shutil.which('agent-browser') else 'не найден'}",
++        ]
++        if failed:
++            lines.append("- Проблемные платформы: " + ", ".join(sorted(p.value for p in failed)))
++        lines.extend([
++            "",
++            "Наличие файлов авторизации не гарантирует, что токен действителен. "
++            "Кнопка «Сегодня» выполняет безопасную живую проверку Calendar и Gmail.",
++        ])
++        return "\n".join(lines)
 +
 +    async def _handle_agents_command(self, event: MessageEvent) -> Union[str, None]:
          """Handle /agents command - list active agents and running tasks."""
@@ -264,7 +1159,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
              started = float(running_started.get(session_key, now))
              elapsed = max(0, int(now - started))
              is_pending = agent is _AGENT_PENDING_SENTINEL
-@@ -1225,17 +1268,12 @@ class GatewaySlashCommandsMixin:
+@@ -1225,17 +1732,12 @@ class GatewaySlashCommandsMixin:
          running_processes: list[dict] = []
          try:
              running_processes = [
@@ -283,7 +1178,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
          lines = [
              t("gateway.agents.header"),
              "",
-@@ -1272,21 +1310,16 @@ class GatewaySlashCommandsMixin:
+@@ -1272,21 +1774,16 @@ class GatewaySlashCommandsMixin:
              if len(running_processes) > 12:
                  lines.append(t("gateway.agents.more", count=len(running_processes) - 12))
  
@@ -309,7 +1204,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
                  if d.get("status") in ("running", "stalling", "finalizing")
              ]
          except Exception:
-@@ -1334,18 +1367,409 @@ class GatewaySlashCommandsMixin:
+@@ -1334,18 +1831,596 @@ class GatewaySlashCommandsMixin:
                      t("gateway.agents.more", count=len(delegations) - 12)
                  )
  
@@ -350,18 +1245,103 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +                getattr(session_entry, "session_id", "") or ""
 +            )
 +
++            scopes = [
++                {
++                    "session_key": current_session_key,
++                    "session_id": parent_session_id,
++                    "label": "Основной чат",
++                    "source": event.source,
++                }
++            ]
++            if (
++                event.source.platform == Platform.TELEGRAM
++                and event.source.chat_type == "dm"
++                and str(event.source.thread_id or "") in {"", "1"}
++                and getattr(self, "_session_db", None)
++            ):
++                try:
++                    bindings = await self._session_db.list_telegram_topic_bindings_for_chat(
++                        chat_id=str(event.source.chat_id)
++                    )
++                except Exception:
++                    logger.debug("Could not load project task scopes", exc_info=True)
++                    bindings = []
++                for row in bindings:
++                    if str(row.get("user_id") or "") != str(event.source.user_id or ""):
++                        continue
++                    project_session_id = str(row.get("session_id") or "")
++                    project_session_key = str(row.get("session_key") or "")
++                    thread_id = str(row.get("thread_id") or "")
++                    if not project_session_id or not project_session_key or not thread_id:
++                        continue
++                    try:
++                        title = await self._session_db.get_session_title(project_session_id)
++                    except Exception:
++                        title = None
++                    scopes.append(
++                        {
++                            "session_key": project_session_key,
++                            "session_id": project_session_id,
++                            "label": " ".join(str(title or f"Проект {thread_id}").split()),
++                            "source": dataclasses.replace(
++                                event.source, thread_id=thread_id, chat_topic=str(title or "")
++                            ),
++                        }
++                    )
++
 +            async def _refresh_items() -> list[dict]:
-+                return self._collect_task_center_items(
-+                    current_session_key, parent_session_id
++                combined: list[dict] = []
++                seen: set[tuple[str, str]] = set()
++                for scope in scopes:
++                    for item in self._collect_task_center_items(
++                        scope["session_key"], scope["session_id"]
++                    ):
++                        identity = (scope["session_key"], str(item.get("id") or ""))
++                        if identity in seen:
++                            continue
++                        seen.add(identity)
++                        combined.append(
++                            {
++                                **item,
++                                "stop_target": item.get("target"),
++                                "target": (
++                                    f"{scope['session_key']}::{item['target']}"
++                                    if item.get("target") else None
++                                ),
++                                "scope_label": scope["label"],
++                                "owner_session_key": scope["session_key"],
++                                "owner_session_id": scope["session_id"],
++                                "owner_source": scope["source"],
++                            }
++                        )
++                combined.sort(
++                    key=lambda item: (
++                        0 if item.get("target") else 1,
++                        str(item.get("scope_label") or ""),
++                        str(item.get("label") or ""),
++                    )
 +                )
++                return combined
 +
 +            async def _on_stop_selected(target: str) -> str:
-+                return await self._stop_menu_target(
-+                    target,
-+                    source=event.source,
-+                    session_key=current_session_key,
-+                    parent_session_id=parent_session_id,
++                current_items = await _refresh_items()
++                selected = (
++                    [item for item in current_items if item.get("target")]
++                    if target == "all"
++                    else [item for item in current_items if item.get("target") == target]
 +                )
++                if not selected:
++                    return "Задача уже завершена."
++                stopped = 0
++                for item in selected:
++                    result = await self._stop_menu_target(
++                        str(item["stop_target"]),
++                        source=item["owner_source"],
++                        session_key=str(item["owner_session_key"]),
++                        parent_session_id=str(item["owner_session_id"]),
++                    )
++                    stopped += result.startswith("Stopped")
++                return f"Остановлено задач: {stopped}."
 +
 +            result = await adapter.send_stop_menu(
 +                chat_id=event.source.chat_id,
@@ -377,8 +1357,9 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +            if result.success:
 +                return None
 +
-+        return "\n".join(lines)
-+
+         return "\n".join(lines)
+ 
+-    async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
 +    def _collect_task_center_items(
 +        self, session_key: str, parent_session_id: str = ""
 +    ) -> list[dict]:
@@ -404,6 +1385,105 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +                }
 +            )
 +        return items
++
++    async def _create_telegram_project(
++        self, event: MessageEvent, requested_title: str = ""
++    ) -> str:
++        """Create one explicit Telegram project topic and bind one Hermes session."""
++        from agent.i18n import get_language
++
++        source = event.source
++        russian = get_language() == "ru"
++        if source.platform != Platform.TELEGRAM or source.chat_type != "dm":
++            return (
++                "Новый проект доступен в личном чате Telegram."
++                if russian else "New projects are available in a Telegram direct chat."
++            )
++        if not self._session_db:
++            return (
++                "Не удалось создать проект: база сессий недоступна."
++                if russian else "Could not create the project: session database is unavailable."
++            )
++        enabled = await self._session_db.is_telegram_topic_mode_enabled(
++            chat_id=str(source.chat_id), user_id=str(source.user_id)
++        )
++        if not enabled:
++            return (
++                "Сначала включите проекты командой /topic."
++                if russian else "Enable projects first with /topic."
++            )
++
++        adapter = self._adapter_for_source(source)
++        create_topic = getattr(adapter, "create_handoff_thread", None)
++        if not callable(create_topic):
++            return (
++                "Не удалось создать проект: Telegram Topics недоступны."
++                if russian else "Could not create the project: Telegram Topics are unavailable."
++            )
++
++        explicit_title = " ".join(str(requested_title or "").split())
++        topic_title = self._sanitize_telegram_topic_title(
++            explicit_title
++            or f"Новый проект · {datetime.now().strftime('%Y-%m-%d %H.%M.%S')}"
++        )
++        thread_id = await create_topic(str(source.chat_id), topic_title)
++        if not thread_id:
++            return (
++                "Не удалось создать проект. Проверьте, что Topics включены в Telegram, и попробуйте ещё раз."
++                if russian else
++                "Could not create the project. Check that Telegram Topics are enabled and try again."
++            )
++
++        project_source = dataclasses.replace(
++            source,
++            thread_id=str(thread_id),
++            chat_topic=topic_title,
++        )
++        try:
++            session_entry = await self.async_session_store.get_or_create_session(
++                project_source
++            )
++            await self._session_db.bind_telegram_topic(
++                chat_id=str(source.chat_id),
++                thread_id=str(thread_id),
++                user_id=str(source.user_id or ""),
++                session_key=session_entry.session_key,
++                session_id=session_entry.session_id,
++            )
++            if explicit_title:
++                await self._session_db.set_session_title(
++                    session_entry.session_id, topic_title
++                )
++            intro_result = await adapter.send(
++                str(source.chat_id),
++                (
++                    "Новый проект создан. Опишите цель первым сообщением — "
++                    "Charline затем переименует тему по смыслу."
++                    if russian else
++                    "Project created. Describe its goal in the first message; "
++                    "Charline will then rename the topic to match."
++                ),
++                metadata={
++                    "thread_id": str(thread_id),
++                    "telegram_dm_topic_created_for_send": True,
++                },
++            )
++            if not getattr(intro_result, "success", False):
++                raise RuntimeError("Telegram project intro delivery failed")
++        except Exception:
++            logger.exception("Failed to initialize Telegram project topic")
++            return (
++                "Тема создана, но подключить сессию проекта не удалось. Не отправляйте туда данные и повторите позже."
++                if russian else
++                "The topic was created, but its project session could not be initialized. "
++                "Do not use it yet; try again later."
++            )
++
++        label = explicit_title or "Новый проект"
++        return (
++            f"Проект «{label}» создан в отдельной теме."
++            if russian else f'Project "{label}" was created in a separate topic.'
++        )
 +
 +    async def _handle_projects_command(self, event: MessageEvent) -> str:
 +        """List Telegram topic projects without enabling topic mode implicitly."""
@@ -432,10 +1512,13 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +                )
 +            return "Projects are not enabled. This chat stays unchanged.\n\nRun /topic once to enable one independent Telegram topic per project."
 +        raw_page = event.get_command_args().strip()
++        if raw_page.lower() == "new" or raw_page.lower().startswith("new "):
++            title = raw_page[3:].strip()
++            return await self._create_telegram_project(event, title)
 +        if raw_page and not raw_page.isdigit():
 +            return (
-+                "Использование: /projects [страница]"
-+                if russian else "Usage: /projects [page]"
++                "Использование: /projects [страница] | /projects new [название]"
++                if russian else "Usage: /projects [page] | /projects new [name]"
 +            )
 +        page = int(raw_page or "1")
 +        if page < 1:
@@ -464,9 +1547,9 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +            lines.extend([
 +                "Проектов пока нет." if russian else "No project topics yet.",
 +                (
-+                    "Открой **Все сообщения** и отправь цель проекта. Telegram создаст отдельную тему."
++                    "Создай проект: /projects new [название] или кнопкой **Новый проект** в /charline."
 +                    if russian else
-+                    "Open **All Messages** and send a project goal. Telegram creates a separate topic."
++                    "Create one with /projects new [name] or the **New Project** button in /charline."
 +                ),
 +            ])
 +            return "\n".join(lines)
@@ -502,9 +1585,9 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +            [
 +                "",
 +                (
-+                    "Открой **Все сообщения** и отправь новую цель, чтобы создать проект."
++                    "Новый проект: /projects new [название] или кнопка в /charline."
 +                    if russian else
-+                    "Open **All Messages** and send a new goal to create another project."
++                    "New project: /projects new [name] or the button in /charline."
 +                ),
 +                (
 +                    "Внутри проекта: /title, /tasks, /background, /stop."
@@ -513,9 +1596,8 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
 +                ),
 +            ]
 +        )
-         return "\n".join(lines)
- 
--    async def _handle_stop_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
++        return "\n".join(lines)
++
 +    def _collect_stop_menu_items(
 +        self, session_key: str, parent_session_id: str = ""
 +    ) -> list[dict]:
@@ -721,7 +1803,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
          """Handle /stop command - interrupt a running agent.
  
          When an agent is truly hung (blocked thread that never checks
-@@ -1361,6 +1785,36 @@ class GatewaySlashCommandsMixin:
+@@ -1361,6 +2436,36 @@ class GatewaySlashCommandsMixin:
          session_entry = await self.async_session_store.get_or_create_session(source)
          session_key = session_entry.session_key
  
@@ -758,7 +1840,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
          agent = self._running_agents.get(session_key)
          if agent is _AGENT_PENDING_SENTINEL:
              # Force-clean the sentinel so the session is unlocked.
-@@ -1411,6 +1865,23 @@ class GatewaySlashCommandsMixin:
+@@ -1411,6 +2516,23 @@ class GatewaySlashCommandsMixin:
          # assistant.threads.setStatus survives a gateway restart or a turn
          # that died without a final send (#32295). Best-effort clear so
          # /stop always dismisses a phantom "is thinking...".
@@ -782,7 +1864,17 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
          adapter = getattr(self, "adapters", {}).get(source.platform)
          if adapter and hasattr(adapter, "_stop_typing_with_metadata"):
              try:
-@@ -5432,7 +5903,12 @@ class GatewaySlashCommandsMixin:
+@@ -4402,9 +5524,6 @@ class GatewaySlashCommandsMixin:
+             logger.exception("Failed to enable Telegram topic mode")
+             return t("gateway.topic.enable_failed", error=exc)
+ 
+-        if not source.thread_id:
+-            await self._ensure_telegram_system_topic(source)
+-
+         if source.thread_id:
+             try:
+                 binding = await self._session_db.get_telegram_topic_binding(
+@@ -5432,7 +6551,12 @@ class GatewaySlashCommandsMixin:
          else:
              choice = "once"
  
@@ -796,7 +1888,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
          if not count:
              return t("gateway.approve.no_pending")
  
-@@ -5486,6 +5962,7 @@ class GatewaySlashCommandsMixin:
+@@ -5486,6 +6610,7 @@ class GatewaySlashCommandsMixin:
          count = resolve_gateway_approval(
              session_key, "deny", resolve_all=resolve_all,
              reason=reason or None,
@@ -805,7 +1897,7 @@ index 8675f317f8b5a5b5e23a70b4731476b7e1709d25..bbe4c0f74d8710f9c3c98fc22ca69ac3
          if not count:
              return t("gateway.deny.no_pending")
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index f3323f020ae1d038e3fd732a1a48237b36212d4f..493dc428c306dcb4eaa4710d04f6eed9d27bfbd2 100644
+index f3323f020ae1d038e3fd732a1a48237b36212d4f..7ee0c205b79855c65292e94572c869a68aab81e2 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -18,6 +18,7 @@ import subprocess
@@ -821,7 +1913,7 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..493dc428c306dcb4eaa4710d04f6eed9
      CommandDef("topic", "Enable or inspect Telegram DM topic sessions", "Session",
                 gateway_only=True, args_hint="[off|help|session-id]"),
 +    CommandDef("projects", "Show Telegram project topics and active work", "Session",
-+               gateway_only=True, args_hint="[page]", busy_policy="dispatch"),
++               gateway_only=True, args_hint="[page|new [name]]", busy_policy="dispatch"),
 +    CommandDef("charline", "Open the Charline assistant menu", "Session",
 +               gateway_only=True, busy_policy="dispatch"),
      CommandDef("clear", "Clear screen and start a new session", "Session",
@@ -925,6 +2017,66 @@ index f3323f020ae1d038e3fd732a1a48237b36212d4f..493dc428c306dcb4eaa4710d04f6eed9
  
  
  def _sanitize_slack_name(raw: str) -> str:
+diff --git a/hermes_state.py b/hermes_state.py
+index 92b238c061fa841aefb34b0c559f9bd431fa4fc0..e56a84c027af87e750360aa88e7cecd2b9774c12 100644
+--- a/hermes_state.py
++++ b/hermes_state.py
+@@ -9428,23 +9428,9 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
+ 
+         Called when the Telegram Bot API confirms a topic was deleted
+         externally (``Thread not found`` after the same-thread retry
+-        already failed).  Without this prune, the stale row keeps
+-        living in ``telegram_dm_topic_bindings`` and the
+-        recovery logic in ``gateway.run._recover_telegram_topic_thread_id``
+-        cheerfully redirects future inbound messages to the deleted
+-        topic, causing tool progress, approvals, and replies to land
+-        in the wrong place.  Issue #31501.
+-
+-        When this prune removes the chat's *last* remaining binding,
+-        the chat's row in ``telegram_dm_topic_mode`` is also flipped to
+-        ``enabled = 0`` in the same transaction.  Otherwise the chat
+-        would be left in topic mode with zero lanes — and
+-        ``gateway.run._recover_telegram_topic_thread_id`` keeps treating
+-        the chat as topic-enabled, lobby messages keep hunting for a
+-        binding that no longer exists, and a user who disabled topics in
+-        the Telegram client (rather than via ``/topic off``) stays stuck
+-        until the next send happens to fail. Clearing the flag makes
+-        recovery fully stand down once the dead topics are gone.
++        already failed). Without this prune, project lists and lookups retain
++        a dead route. Topic mode stays enabled because it represents project
++        support, not the presence of at least one project. Issue #31501.
+ 
+         Returns the number of binding rows deleted (0 when the binding
+         was already absent or the topic-mode tables haven't been
+@@ -9469,28 +9455,6 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
+                 # Tables don't exist yet — nothing to prune.
+                 deleted["count"] = 0
+                 return
+-            if not deleted["count"]:
+-                return
+-            # If that was the chat's last binding, disable topic mode for
+-            # the chat so recovery stops steering lobby messages at a now
+-            # empty lane set. Same transaction → no read-after-prune race.
+-            try:
+-                remaining = conn.execute(
+-                    """
+-                    SELECT 1 FROM telegram_dm_topic_bindings
+-                    WHERE chat_id = ? LIMIT 1
+-                    """,
+-                    (chat_id,),
+-                ).fetchone()
+-                if remaining is None:
+-                    conn.execute(
+-                        "UPDATE telegram_dm_topic_mode "
+-                        "SET enabled = 0, updated_at = ? WHERE chat_id = ?",
+-                        (time.time(), chat_id),
+-                    )
+-            except sqlite3.OperationalError:
+-                # telegram_dm_topic_mode absent — binding prune still stands.
+-                pass
+ 
+         self._execute_write(_do)
+         return deleted["count"]
 diff --git a/package-lock.json b/package-lock.json
 index d7cd4adf58606b0029da83e5e7877d2b59904bce..b0eea535a940d8fcef638f67eab57d13ede84d5a 100644
 --- a/package-lock.json
@@ -991,7 +2143,7 @@ index 81a56b1b83905214586536feb6cfdab165e9cd48..3501fa43604b6c00bd36e5fd46c3fbe3
    "engines": {
      "node": ">=22.22.0",
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb0d6641d9 100644
+index eea8e316ff796bfdf9f35868bf01470fcf776a92..4f8bb9f4cc333112818d7be224fe86db1a7b2ce9 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -16,6 +16,7 @@ import logging
@@ -1002,16 +2154,81 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
  import threading
  import time
  from contextvars import ContextVar
-@@ -876,6 +877,8 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -234,7 +235,9 @@ async def _shutdown_abandoned_app(app) -> None:
+             logger.debug("Abandoned Telegram request shutdown failed", exc_info=True)
+ 
+ try:
+-    from telegram import Update, Bot, Message, InlineKeyboardButton, InlineKeyboardMarkup
++    from telegram import (
++        Update, Bot, Message, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply,
++    )
+     try:
+         from telegram import LinkPreviewOptions
+     except ImportError:
+@@ -255,6 +258,7 @@ except ImportError:
+     Update = Any
+     Bot = Any
+     Message = Any
++    ForceReply = Any
+     InlineKeyboardButton = Any
+     InlineKeyboardMarkup = Any
+     LinkPreviewOptions = None
+@@ -411,7 +415,7 @@ def check_telegram_requirements() -> bool:
+     install, re-imports the SDK and flips ``TELEGRAM_AVAILABLE`` to True
+     so the adapter's class-level type aliases get rebound.
+     """
+-    global TELEGRAM_AVAILABLE, Update, Bot, Message, InlineKeyboardButton
++    global TELEGRAM_AVAILABLE, Update, Bot, Message, InlineKeyboardButton, ForceReply
+     global InlineKeyboardMarkup, LinkPreviewOptions, Application
+     global CommandHandler, CallbackQueryHandler, TelegramMessageHandler
+     global ContextTypes, filters, ParseMode, ChatType, HTTPXRequest
+@@ -424,7 +428,10 @@ def check_telegram_requirements() -> bool:
+         return False
+     try:
+         from telegram import Update as _Update, Bot as _Bot, Message as _Message
+-        from telegram import InlineKeyboardButton as _IKB, InlineKeyboardMarkup as _IKM
++        from telegram import (
++            InlineKeyboardButton as _IKB, InlineKeyboardMarkup as _IKM,
++            ForceReply as _ForceReply,
++        )
+         try:
+             from telegram import LinkPreviewOptions as _LPO
+         except ImportError:
+@@ -444,6 +451,7 @@ def check_telegram_requirements() -> bool:
+     Message = _Message
+     InlineKeyboardButton = _IKB
+     InlineKeyboardMarkup = _IKM
++    ForceReply = _ForceReply
+     LinkPreviewOptions = _LPO
+     Application = _App
+     CommandHandler = _CH
+@@ -876,6 +884,9 @@ class TelegramAdapter(BasePlatformAdapter):
          # Clarify button state: clarify_id → session_key (for the clarify tool's
          # multiple-choice prompts; see GatewayRunner clarify_callback wiring).
          self._clarify_state: Dict[str, str] = {}
 +        self._stop_menu_state: Dict[str, dict] = {}
 +        self._charline_menu_state: Dict[str, dict] = {}
++        self._automation_menu_state: Dict[str, dict] = {}
          # Notification mode for message sends.
          # "important" — only final responses, approvals, and slash confirmations
          #               trigger notifications; tool progress, streaming, status
-@@ -3614,6 +3617,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -1317,13 +1328,8 @@ class TelegramAdapter(BasePlatformAdapter):
+         """Drop the stale ``telegram_dm_topic_bindings`` row for a
+         topic Telegram has confirmed deleted.
+ 
+-        Without this prune the recovery logic in
+-        ``gateway.run._recover_telegram_topic_thread_id`` keeps
+-        steering future inbound messages to the dead thread (the
+-        bug behind #31501 — tool progress, approvals, replies all
+-        end up in the wrong place even though the user has moved
+-        on to a fresh topic).  Best-effort: we never raise from a
+-        send-fallback path — a failed cleanup must not turn into a
++        Without this prune, /projects and session lookups retain a dead
++        project route. Best-effort: a failed cleanup must not turn into a
+         failed user-facing send.
+         """
+         if chat_id is None or thread_id is None:
+@@ -3614,6 +3620,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      BotCommandScopeAllPrivateChats,
                      BotCommandScopeAllGroupChats,
                      BotCommandScopeDefault,
@@ -1019,7 +2236,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                  )
                  from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
                  if not self._bot:
-@@ -3636,6 +3640,18 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -3636,6 +3643,18 @@ class TelegramAdapter(BasePlatformAdapter):
                          logger.info("[%s] set_my_commands OK for scope %s (%d cmds)", self.name, scope_name, len(bot_commands))
                      except Exception as scope_err:
                          logger.warning("[%s] set_my_commands FAILED for scope %s: %s", self.name, scope_name, scope_err)
@@ -1038,7 +2255,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                  # Forum topics don't inherit AllGroupChats — Telegram resolves
                  # commands via BotCommandScopeChat(chat_id) for forum groups.
                  # Lazy registration happens in _ensure_forum_commands on first
-@@ -5705,16 +5721,19 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5705,16 +5724,19 @@ class TelegramAdapter(BasePlatformAdapter):
                  # Telegram caps callback_data at 64 bytes; keep "cl:<id>:<idx>"
                  # short.
                  rows = []
@@ -1061,65 +2278,176 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                          callback_data=f"cl:{clarify_id}:other",
                      )
                  ])
-@@ -5738,6 +5757,268 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -5738,6 +5760,476 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.warning("[%s] send_clarify failed: %s", self.name, _redact_telegram_error_text(e))
              return SendResult(success=False, error=_redact_telegram_error_text(e))
  
 +    @staticmethod
-+    def _render_charline_panel(menu_id: str, section: str = "home") -> tuple[str, Any]:
++    def _render_charline_panel(
++        menu_id: str,
++        section: str = "home",
++        *,
++        project: bool = False,
++        project_title: str = "",
++        items: Optional[list[dict]] = None,
++        notice: str = "",
++        confirm_index: Optional[int] = None,
++    ) -> tuple[str, Any]:
 +        if section == "home":
 +            rows = [
++                [
++                    InlineKeyboardButton("Сегодня", callback_data=f"ch:{menu_id}:today"),
++                    InlineKeyboardButton("Новая задача", callback_data=f"ch:{menu_id}:new"),
++                ],
++                [
++                    InlineKeyboardButton("Задачи", callback_data=f"ch:{menu_id}:tasks"),
++                    InlineKeyboardButton("Проекты", callback_data=f"ch:{menu_id}:projects"),
++                ],
 +                [
 +                    InlineKeyboardButton("Календарь", callback_data=f"ch:{menu_id}:calendar"),
 +                    InlineKeyboardButton("Почта", callback_data=f"ch:{menu_id}:mail"),
 +                ],
 +                [
 +                    InlineKeyboardButton("Файлы", callback_data=f"ch:{menu_id}:files"),
-+                    InlineKeyboardButton("Задачи", callback_data=f"ch:{menu_id}:tasks"),
++                    InlineKeyboardButton("Расписания", callback_data=f"ch:{menu_id}:automations"),
 +                ],
 +                [
-+                    InlineKeyboardButton("Проекты", callback_data=f"ch:{menu_id}:projects"),
-+                    InlineKeyboardButton("Новая задача", callback_data=f"ch:{menu_id}:new"),
++                    InlineKeyboardButton("Исследование", callback_data=f"ch:{menu_id}:research"),
++                    InlineKeyboardButton("Память", callback_data=f"ch:{menu_id}:memory"),
++                ],
++                [
++                    InlineKeyboardButton("Сервисы", callback_data=f"ch:{menu_id}:services"),
++                    InlineKeyboardButton("Новый проект", callback_data=f"ch:{menu_id}:new_project"),
++                ],
++                [
++                    InlineKeyboardButton(
++                        "Все функции Hermes", callback_data=f"ch:{menu_id}:advanced_commands"
++                    ),
 +                ],
 +            ]
++            if project:
++                rows.insert(0, [
++                    InlineKeyboardButton(
++                        "Сводка проекта", callback_data=f"ch:{menu_id}:project_summary"
++                    )
++                ])
 +            return (
-+                "<b>Charline</b>\n\nВыберите раздел или напишите задачу обычными словами.",
++                (
++                    "<b>Charline · проект</b>\n\n"
++                    f"<b>{_html.escape(project_title or 'Проект')}</b>\n"
++                    "Действия относятся к текущему проекту. Задачи и результаты останутся в этой теме."
++                    if project else
++                    "<b>Charline</b>\n\nГлавная панель ассистента. Выберите раздел или напишите задачу обычными словами."
++                ),
 +                InlineKeyboardMarkup(rows),
 +            )
 +
-+        details = {
-+            "calendar": (
-+                "<b>Календарь</b>\n\n"
-+                "Напишите, например:\n"
-+                "• Покажи расписание на сегодня\n"
-+                "• Найди свободное время завтра\n"
-+                "• Создай встречу в пятницу в 15:00"
-+            ),
-+            "mail": (
-+                "<b>Почта</b>\n\n"
-+                "Напишите, например:\n"
-+                "• Покажи важные непрочитанные письма\n"
-+                "• Найди письмо от Ивана\n"
-+                "• Подготовь ответ"
-+            ),
-+            "files": (
-+                "<b>Файлы</b>\n\n"
-+                "Напишите, например:\n"
-+                "• Найди план проекта на Google Drive\n"
-+                "• Покажи последние документы\n"
-+                "• Создай документ по моему черновику"
-+            ),
-+            "new": (
-+                "<b>Новая задача</b>\n\n"
-+                "Напишите или продиктуйте задачу обычными словами."
-+            ),
-+        }
-+        text = details.get(section)
-+        if text is None:
-+            raise ValueError("unknown Charline panel section")
-+        return text, InlineKeyboardMarkup([[
-+            InlineKeyboardButton("Назад", callback_data=f"ch:{menu_id}:home")
-+        ]])
++        if section == "research":
++            return (
++                "<b>Исследование</b>\n\n"
++                "Быстрый режим отвечает на конкретный вопрос. Глубокий режим строит план, "
++                "работает по нескольким источникам и возвращает отчёт со ссылками. "
++                "Ход фоновой работы виден в разделе «Задачи».",
++                InlineKeyboardMarkup([
++                    [
++                        InlineKeyboardButton(
++                            "Быстрый поиск", callback_data=f"ch:{menu_id}:research_quick"
++                        ),
++                        InlineKeyboardButton(
++                            "Глубокое", callback_data=f"ch:{menu_id}:research_deep"
++                        ),
++                    ],
++                    [InlineKeyboardButton("Активные задачи", callback_data=f"ch:{menu_id}:tasks")],
++                    [InlineKeyboardButton("Назад", callback_data=f"ch:{menu_id}:home")],
++                ]),
++            )
++
++        if section == "memory":
++            return (
++                "<b>Память</b>\n\n"
++                "Предпочтения и личные сведения хранятся отдельно от контекста проектов. "
++                "Записи можно добавлять и удалять обычным разговором.",
++                InlineKeyboardMarkup([
++                    [
++                        InlineKeyboardButton(
++                            "Запомнить", callback_data=f"ch:{menu_id}:memory_remember"
++                        ),
++                        InlineKeyboardButton(
++                            "Забыть", callback_data=f"ch:{menu_id}:memory_forget"
++                        ),
++                    ],
++                    [
++                        InlineKeyboardButton(
++                            "Записи", callback_data=f"ch:{menu_id}:memory_entries"
++                        )
++                    ],
++                    [
++                        InlineKeyboardButton(
++                            "Ожидают подтверждения",
++                            callback_data=f"ch:{menu_id}:memory_pending",
++                        )
++                    ],
++                    [InlineKeyboardButton("Назад", callback_data=f"ch:{menu_id}:home")],
++                ]),
++            )
++
++        if section == "projects":
++            projects = list(items or [])[:10]
++            lines = ["<b>Проекты</b>"]
++            if notice:
++                lines.extend(["", _html.escape(notice)])
++            rows = []
++            if not projects:
++                lines.extend(["", "Проектов пока нет."])
++            for index, item in enumerate(projects, 1):
++                label = _html.escape(str(item.get("label") or f"Проект {index}"))
++                active = int(item.get("active") or 0)
++                current = " · текущий" if item.get("current") else ""
++                lines.extend(["", f"<b>{index}. {label}</b>", f"Активных задач: {active}{current}"])
++                rows.append([
++                    InlineKeyboardButton(
++                        f"Сводка {index}", callback_data=f"ch:{menu_id}:project_summary_{index - 1}"
++                    ),
++                    InlineKeyboardButton(
++                        f"Задачи {index}", callback_data=f"ch:{menu_id}:project_tasks_{index - 1}"
++                    ),
++                ])
++            rows.extend([
++                [InlineKeyboardButton("Новый проект", callback_data=f"ch:{menu_id}:new_project")],
++                [InlineKeyboardButton("Назад", callback_data=f"ch:{menu_id}:home")],
++            ])
++            return "\n".join(lines), InlineKeyboardMarkup(rows)
++
++        if section == "memory_entries":
++            memories = list(items or [])[:12]
++            lines = ["<b>Память</b>"]
++            if notice:
++                lines.extend(["", _html.escape(notice)])
++            rows = []
++            if not memories:
++                lines.extend(["", "Сохранённых записей пока нет."])
++            for index, item in enumerate(memories, 1):
++                source = _html.escape(str(item.get("source") or "Запись"))
++                content = " ".join(str(item.get("content") or "").split())
++                preview = content if len(content) <= 180 else content[:177] + "…"
++                lines.extend(["", f"<b>{index}. {source}</b>", _html.escape(preview)])
++                if confirm_index == index - 1:
++                    rows.append([
++                        InlineKeyboardButton(
++                            f"Удалить {index}", callback_data=f"ch:{menu_id}:memory_confirm_{index - 1}"
++                        ),
++                        InlineKeyboardButton("Отмена", callback_data=f"ch:{menu_id}:memory_entries"),
++                    ])
++                else:
++                    rows.append([InlineKeyboardButton(
++                        f"Удалить {index}", callback_data=f"ch:{menu_id}:memory_delete_{index - 1}"
++                    )])
++            if len(items or []) > 12:
++                lines.extend(["", f"Показаны первые 12 из {len(items or [])} записей."])
++            rows.append([InlineKeyboardButton("Назад", callback_data=f"ch:{menu_id}:memory")])
++            return "\n".join(lines), InlineKeyboardMarkup(rows)
++
++        raise ValueError("unknown Charline panel section")
 +
 +    async def send_charline_menu(
 +        self,
@@ -1127,14 +2455,18 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
 +        session_key: str,
 +        on_action,
 +        owner_user_id: str = "",
++        project_title: str = "",
 +        metadata: Optional[Dict[str, Any]] = None,
 +    ) -> SendResult:
 +        """Render Charline navigation with native Telegram buttons."""
 +        if not self._bot:
 +            return SendResult(success=False, error="Not connected")
 +        menu_id = secrets.token_hex(4)
-+        text, keyboard = self._render_charline_panel(menu_id)
 +        thread_id = self._metadata_thread_id(metadata)
++        project = bool(thread_id and str(thread_id) != "1")
++        text, keyboard = self._render_charline_panel(
++            menu_id, project=project, project_title=project_title
++        )
 +        try:
 +            reply_to_id = self._reply_to_message_id_for_send(None, metadata)
 +            kwargs: Dict[str, Any] = {
@@ -1164,12 +2496,103 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
 +                "thread_id": str(thread_id or ""),
 +                "message_id": str(message.message_id),
 +                "created_at": time.monotonic(),
++                "project": project,
++                "project_title": str(project_title or ""),
 +                "callback": on_action,
 +            }
 +            return SendResult(success=True, message_id=str(message.message_id))
 +        except Exception as exc:
 +            logger.warning(
 +                "[%s] send_charline_menu failed: %s",
++                self.name,
++                _redact_telegram_error_text(exc),
++            )
++            return SendResult(success=False, error=_redact_telegram_error_text(exc))
++
++    @staticmethod
++    def _render_automation_center(
++        menu_id: str, jobs: list[dict], notice: str = ""
++    ) -> tuple[str, Any]:
++        lines = ["<b>Расписания</b>"]
++        if notice:
++            lines.extend(["", _html.escape(notice)])
++        rows = []
++        if not jobs:
++            lines.extend(["", "Активных и приостановленных расписаний пока нет."])
++        for index, job in enumerate(jobs[:8], 1):
++            name = _html.escape(str(job.get("name") or f"Расписание {index}"))
++            schedule = _html.escape(str(job.get("schedule") or "без расписания"))
++            state = str(job.get("state") or "scheduled")
++            state_label = {
++                "scheduled": "активно",
++                "paused": "пауза",
++                "completed": "завершено",
++                "failed": "ошибка",
++            }.get(state, state)
++            lines.extend(["", f"<b>{index}. {name}</b>", f"{schedule} · {state_label}"])
++            if state == "paused":
++                rows.append([InlineKeyboardButton(
++                    f"▶ Продолжить {index}",
++                    callback_data=f"au:{menu_id}:resume:{index - 1}",
++                )])
++            elif state == "scheduled":
++                rows.append([
++                    InlineKeyboardButton(
++                        f"⏸ Пауза {index}",
++                        callback_data=f"au:{menu_id}:pause:{index - 1}",
++                    ),
++                    InlineKeyboardButton(
++                        f"▶ Запустить {index}",
++                        callback_data=f"au:{menu_id}:run:{index - 1}",
++                    ),
++                ])
++        if len(jobs) > 8:
++            lines.extend(["", f"Показаны первые 8 из {len(jobs)} расписаний."])
++        rows.append([
++            InlineKeyboardButton("Обновить", callback_data=f"au:{menu_id}:refresh:x"),
++            InlineKeyboardButton("История", callback_data=f"au:{menu_id}:history:x"),
++            InlineKeyboardButton("Создать", callback_data=f"au:{menu_id}:create:x"),
++        ])
++        return "\n".join(lines), InlineKeyboardMarkup(rows)
++
++    async def send_automation_menu(
++        self,
++        chat_id: str,
++        jobs: list[dict],
++        on_action,
++        owner_user_id: str = "",
++        metadata: Optional[Dict[str, Any]] = None,
++    ) -> SendResult:
++        """Render Hermes cron jobs as one native Telegram control card."""
++        if not self._bot:
++            return SendResult(success=False, error="Not connected")
++        menu_id = secrets.token_hex(4)
++        current_jobs = list(jobs)
++        text, keyboard = self._render_automation_center(menu_id, current_jobs)
++        thread_id = self._metadata_thread_id(metadata)
++        try:
++            kwargs: Dict[str, Any] = {
++                "chat_id": normalize_telegram_chat_id(chat_id),
++                "text": text,
++                "parse_mode": ParseMode.HTML,
++                "reply_markup": keyboard,
++                **self._link_preview_kwargs(),
++            }
++            kwargs.update(self._thread_kwargs_for_send(chat_id, thread_id, metadata))
++            message = await self._send_message_with_thread_fallback(**kwargs)
++            self._automation_menu_state[menu_id] = {
++                "owner_user_id": str(owner_user_id or ""),
++                "chat_id": str(normalize_telegram_chat_id(chat_id)),
++                "thread_id": str(thread_id or ""),
++                "message_id": str(message.message_id),
++                "created_at": time.monotonic(),
++                "jobs": current_jobs,
++                "callback": on_action,
++            }
++            return SendResult(success=True, message_id=str(message.message_id))
++        except Exception as exc:
++            logger.warning(
++                "[%s] send_automation_menu failed: %s",
 +                self.name,
 +                _redact_telegram_error_text(exc),
 +            )
@@ -1283,12 +2706,14 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
 +                str(item.get("state") or "running"),
 +            )
 +            elapsed = int(item.get("elapsed", 0) or 0)
++            scope_label = str(item.get("scope_label") or "")
 +            duration = f" · {elapsed // 60}м" if russian and elapsed >= 60 else ""
 +            if not russian and elapsed >= 60:
 +                duration = f" · {elapsed // 60}m"
 +            lines.append(
 +                f"{index + 1}. <b>{_html.escape(label)}</b>\n"
 +                f"   <code>{_html.escape(kind)} · {_html.escape(state)}{duration}</code>"
++                + (f"\n   {_html.escape(scope_label)}" if scope_label else "")
 +            )
 +            if item.get("detail"):
 +                rows.append([
@@ -1330,7 +2755,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
      async def send_model_picker(
          self,
          chat_id: str,
-@@ -6415,6 +6696,187 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6415,6 +6907,449 @@ class TelegramAdapter(BasePlatformAdapter):
          query_thread_id = getattr(query_message, "message_thread_id", None)
          query_user_name = getattr(query.from_user, "first_name", None)
  
@@ -1372,9 +2797,64 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
 +                await query.answer(text="This Charline menu expired. Run /charline again.")
 +                return
 +
-+            if action in {"home", "calendar", "mail", "files", "new"}:
++            prompts = {
++                "new": (
++                    "<b>Новая задача</b>\n\nОтветьте на это сообщение текстом или голосом. "
++                    "Опишите результат, который нужно получить.",
++                    "Опишите задачу",
++                ),
++                "research_quick": (
++                    "<b>Быстрый поиск</b>\n\nОтветьте конкретным вопросом. "
++                    "Charline найдёт актуальные источники и даст краткий ответ со ссылками.",
++                    "Что нужно найти?",
++                ),
++                "research_deep": (
++                    "<b>Глубокое исследование</b>\n\nОтветьте темой, желаемым результатом "
++                    "и ограничениями по источникам. Сначала Charline покажет план, затем сможет "
++                    "выполнить работу параллельно в фоне.",
++                    "Опишите тему исследования",
++                ),
++                "memory_remember": (
++                    "<b>Запомнить</b>\n\nОтветьте, что Charline должна учитывать в будущих разговорах.",
++                    "Что нужно запомнить?",
++                ),
++                "memory_forget": (
++                    "<b>Забыть</b>\n\nОтветьте, какую сохранённую информацию нужно удалить.",
++                    "Что нужно забыть?",
++                ),
++            }
++            if action in prompts:
++                prompt_text, placeholder = prompts[action]
++                await query.answer()
++                metadata = (
++                    {"thread_id": str(query_thread_id)}
++                    if query_thread_id is not None else None
++                )
++                kwargs: Dict[str, Any] = {
++                    "chat_id": normalize_telegram_chat_id(str(query_chat_id)),
++                    "text": prompt_text,
++                    "parse_mode": ParseMode.HTML,
++                    "reply_markup": ForceReply(
++                        selective=True, input_field_placeholder=placeholder
++                    ),
++                    **self._link_preview_kwargs(),
++                }
++                kwargs.update(
++                    self._thread_kwargs_for_send(
++                        str(query_chat_id), query_thread_id, metadata
++                    )
++                )
++                await self._send_message_with_thread_fallback(**kwargs)
++                return
++
++            if action in {"home", "research", "memory"}:
 +                try:
-+                    text, keyboard = self._render_charline_panel(menu_id, action)
++                    text, keyboard = self._render_charline_panel(
++                        menu_id,
++                        action,
++                        project=bool(state.get("project")),
++                        project_title=str(state.get("project_title") or ""),
++                    )
 +                except ValueError:
 +                    await query.answer(text="Invalid Charline action.")
 +                    return
@@ -1386,19 +2866,127 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
 +                await query.answer()
 +                return
 +
-+            if action not in {"tasks", "projects"}:
++            if action == "memory_entries":
++                callback = state.get("callback")
++                if not callable(callback):
++                    await query.answer(text="Панель устарела. Выполните /charline снова.")
++                    return
++                await query.answer(text="Обновляю…")
++                result = await callback("memory_entries")
++                if not isinstance(result, dict):
++                    return
++                state["memory_items"] = list(result.get("items") or [])
++                text, keyboard = self._render_charline_panel(
++                    menu_id,
++                    "memory_entries",
++                    items=state["memory_items"],
++                    notice=str(result.get("notice") or ""),
++                )
++                await query.edit_message_text(
++                    text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
++                )
++                return
++
++            for prefix, confirm in (("memory_delete_", False), ("memory_confirm_", True)):
++                if not action.startswith(prefix):
++                    continue
++                try:
++                    index = int(action.removeprefix(prefix))
++                    item = state["memory_items"][index]
++                except (ValueError, IndexError, KeyError, TypeError):
++                    await query.answer(text="Запись изменилась. Обновите раздел.")
++                    return
++                if not confirm:
++                    text, keyboard = self._render_charline_panel(
++                        menu_id,
++                        "memory_entries",
++                        items=state["memory_items"],
++                        notice="Подтвердите удаление записи.",
++                        confirm_index=index,
++                    )
++                    await query.edit_message_text(
++                        text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
++                    )
++                    await query.answer()
++                    return
++                callback = state.get("callback")
++                if not callable(callback):
++                    await query.answer(text="Панель устарела. Выполните /charline снова.")
++                    return
++                await query.answer(text="Удаляю…")
++                result = await callback("memory_remove", item)
++                if isinstance(result, dict):
++                    state["memory_items"] = list(result.get("items") or [])
++                    text, keyboard = self._render_charline_panel(
++                        menu_id,
++                        "memory_entries",
++                        items=state["memory_items"],
++                        notice=str(result.get("notice") or ""),
++                    )
++                    await query.edit_message_text(
++                        text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
++                    )
++                return
++
++            for prefix, target_action in (
++                ("project_summary_", "project_summary"),
++                ("project_tasks_", "project_tasks"),
++            ):
++                if not action.startswith(prefix):
++                    continue
++                try:
++                    index = int(action.removeprefix(prefix))
++                    item = state["project_items"][index]
++                except (ValueError, IndexError, KeyError, TypeError):
++                    await query.answer(text="Проект изменился. Обновите раздел.")
++                    return
++                callback = state.get("callback")
++                if not callable(callback):
++                    await query.answer(text="Панель устарела. Выполните /charline снова.")
++                    return
++                await query.answer(text="Открываю…")
++                result = await callback(target_action, item)
++                if result:
++                    metadata = {"thread_id": str(query_thread_id)} if query_thread_id is not None else None
++                    await self.send(str(query_chat_id), str(result), metadata=metadata)
++                return
++
++            if action not in {
++                "tasks", "projects", "new_project", "today", "calendar", "mail", "files",
++                "automations", "memory_pending", "services", "advanced_commands",
++                "project_summary",
++            }:
 +                await query.answer(text="Invalid Charline action.")
 +                return
 +            callback = state.get("callback")
 +            if not callable(callback):
 +                await query.answer(text="This Charline menu expired. Run /charline again.")
 +                return
++            if action == "new_project":
++                if state.get("new_project_started"):
++                    await query.answer(text="Проект уже создаётся.")
++                    return
++                # A callback is the explicit write intent. Consume it before
++                # the first await so double taps cannot create two topics.
++                state["new_project_started"] = True
 +            await query.answer(text="Открываю…")
 +            try:
 +                result = await callback(action)
 +            except Exception:
 +                logger.exception("Telegram Charline-menu callback failed")
 +                result = "Не удалось открыть раздел. Повторите /charline."
++            if isinstance(result, dict) and result.get("section") == "projects":
++                state["project_items"] = list(result.get("items") or [])
++                text, keyboard = self._render_charline_panel(
++                    menu_id,
++                    "projects",
++                    items=state["project_items"],
++                    notice=str(result.get("notice") or ""),
++                )
++                await query.edit_message_text(
++                    text=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
++                )
++                return
 +            if result:
 +                metadata = {}
 +                if query_thread_id is not None:
@@ -1406,6 +2994,105 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
 +                await self.send(
 +                    str(query_chat_id), str(result), metadata=metadata or None
 +                )
++            return
++
++        # --- Charline schedules (au:menu_id:action:index) ---
++        if data.startswith("au:"):
++            parts = data.split(":", 3)
++            if len(parts) != 4:
++                await query.answer(text="Некорректное действие.")
++                return
++            caller_id = str(getattr(query.from_user, "id", ""))
++            if not self._is_callback_user_authorized(
++                caller_id,
++                chat_id=query_chat_id,
++                chat_type=str(query_chat_type) if query_chat_type is not None else None,
++                thread_id=str(query_thread_id) if query_thread_id is not None else None,
++                user_name=query_user_name,
++            ):
++                await query.answer(text="Нет доступа к этим расписаниям.")
++                return
++            menu_id, action, raw_index = parts[1], parts[2], parts[3]
++            now = time.monotonic()
++            for stale_id, stale in list(self._automation_menu_state.items()):
++                if now - float(stale.get("created_at", now)) > 900:
++                    self._automation_menu_state.pop(stale_id, None)
++            state = self._automation_menu_state.get(menu_id)
++            message_id = str(getattr(query_message, "message_id", "") or "")
++            if not state:
++                await query.answer(text="Карточка устарела. Откройте /charline снова.")
++                return
++            if state.get("owner_user_id") and caller_id != state["owner_user_id"]:
++                await query.answer(text="Нет доступа к этим расписаниям.")
++                return
++            if (
++                str(query_chat_id or "") != state.get("chat_id", "")
++                or str(query_thread_id or "") != state.get("thread_id", "")
++                or message_id != state.get("message_id", "")
++            ):
++                await query.answer(text="Карточка устарела. Откройте /charline снова.")
++                return
++            if action == "create":
++                await query.answer(text="Опишите расписание сообщением.")
++                metadata = {"thread_id": str(query_thread_id)} if query_thread_id is not None else None
++                kwargs: Dict[str, Any] = {
++                    "chat_id": normalize_telegram_chat_id(str(query_chat_id)),
++                    "text": (
++                        "<b>Новое расписание</b>\n\nОтветьте, что нужно делать и когда. "
++                        "Например: «Каждый будний день в 8:30 присылай план дня»."
++                    ),
++                    "parse_mode": ParseMode.HTML,
++                    "reply_markup": ForceReply(
++                        selective=True,
++                        input_field_placeholder="Что делать и когда?",
++                    ),
++                    **self._link_preview_kwargs(),
++                }
++                kwargs.update(
++                    self._thread_kwargs_for_send(
++                        str(query_chat_id), query_thread_id, metadata
++                    )
++                )
++                await self._send_message_with_thread_fallback(**kwargs)
++                return
++            if action not in {"refresh", "history", "pause", "resume", "run"}:
++                await query.answer(text="Некорректное действие.")
++                return
++            job_id = ""
++            if action not in {"refresh", "history"}:
++                try:
++                    job_id = str(state["jobs"][int(raw_index)]["job_id"])
++                except (ValueError, IndexError, KeyError, TypeError):
++                    await query.answer(text="Расписание больше недоступно.")
++                    return
++            callback = state.get("callback")
++            if not callable(callback):
++                await query.answer(text="Карточка устарела. Откройте /charline снова.")
++                return
++            await query.answer(text="Обновляю…" if action == "refresh" else "Выполняю…")
++            try:
++                result = await callback(action, job_id)
++                state["jobs"] = list(result.get("jobs") or [])
++                if result.get("detail"):
++                    metadata = (
++                        {"thread_id": str(query_thread_id)}
++                        if query_thread_id is not None else None
++                    )
++                    await self.send(
++                        str(query_chat_id), str(result["detail"]), metadata=metadata
++                    )
++                text, keyboard = self._render_automation_center(
++                    menu_id,
++                    state["jobs"],
++                    notice=str(result.get("notice") or ""),
++                )
++                await query.edit_message_text(
++                    text=text,
++                    parse_mode=ParseMode.HTML,
++                    reply_markup=keyboard,
++                )
++            except Exception:
++                logger.exception("Telegram automation-menu callback failed")
 +            return
 +
 +        # --- Active-work stop menu callbacks (st:menu_id:index|all) ---
@@ -1518,7 +3205,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
          # --- Model picker callbacks ---
          if data.startswith(("mp:", "mpg:", "mpv:", "mm:", "mc:", "mb", "mx", "mg:")):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -6464,7 +6926,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6464,7 +7399,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      await query.answer(text="⛔ You are not authorized to approve commands.")
                      return
  
@@ -1527,7 +3214,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                  if not session_key:
                      await query.answer(text="This approval has already been resolved.")
                      return
-@@ -6479,7 +6941,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6479,7 +7414,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  # regression follow-up: 60s waits made stale taps common).
                  try:
                      from tools.approval import resolve_gateway_approval
@@ -1538,7 +3225,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                      logger.info(
                          "Telegram button resolved %d approval(s) for session %s (choice=%s, user=%s)",
                          count, session_key, choice, user_display,
-@@ -6489,6 +6953,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6489,6 +7426,7 @@ class TelegramAdapter(BasePlatformAdapter):
                      count = 0
  
                  if count:
@@ -1546,7 +3233,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                      # Map choice to human-readable label
                      label_map = {
                          "once": "✅ Approved once",
-@@ -6648,6 +7113,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6648,6 +7586,10 @@ class TelegramAdapter(BasePlatformAdapter):
                  if not session_key:
                      await query.answer(text="This prompt has already been resolved.")
                      return
@@ -1557,7 +3244,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
  
                  user_display = getattr(query.from_user, "first_name", "User")
  
-@@ -6661,7 +7130,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6661,7 +7603,9 @@ class TelegramAdapter(BasePlatformAdapter):
                      flipped = False
                      try:
                          from tools.clarify_gateway import mark_awaiting_text
@@ -1568,7 +3255,7 @@ index eea8e316ff796bfdf9f35868bf01470fcf776a92..eff5cdc3642e8bb1b72ceb768dede9eb
                      except Exception as exc:
                          logger.warning("[%s] mark_awaiting_text failed: %s", self.name, exc)
  
-@@ -6712,7 +7183,9 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6712,7 +7656,9 @@ class TelegramAdapter(BasePlatformAdapter):
                  self._clarify_state.pop(clarify_id, None)
                  try:
                      from tools.clarify_gateway import resolve_gateway_clarify
@@ -1671,12 +3358,99 @@ index 70c4ba0e04cfea269da303e72091d0de78ba07b9..8a656e125d0cb64cad4db9688275b57d
      def test_xai_renames_client_web_search_when_firecrawl_configured(self, transport, monkeypatch):
          """Configured Firecrawl (or any non-xai backend) must keep Hermes
          dispatch — rename the wire tool so Grok cannot hijack ``web_search``.
+diff --git a/tests/gateway/test_42039_duplicate_user_message.py b/tests/gateway/test_42039_duplicate_user_message.py
+index 13a73181f627a49d36c0b63fe99669a6ad944997..17935cb99b03fc120398fbfd3021073562e443bc 100644
+--- a/tests/gateway/test_42039_duplicate_user_message.py
++++ b/tests/gateway/test_42039_duplicate_user_message.py
+@@ -44,7 +44,6 @@ def _bootstrap(monkeypatch, tmp_path):
+     runner._set_session_env = lambda _context: None
+     runner._handle_active_session_busy_message = AsyncMock(return_value=False)
+     runner._session_db = MagicMock()
+-    runner._recover_telegram_topic_thread_id = lambda _source: None
+     runner._cache_session_source = lambda _key, _source: None
+     runner._is_session_run_current = lambda _key, _gen: True
+     runner._begin_session_run_generation = lambda _key: 1
+@@ -190,4 +189,3 @@ async def test_not_new_messages_skip_db_when_agent_has_session_db(
+ 
+ # ── Test 4: normal path (new_messages found) uses skip_db=True ────────
+ 
+-
+diff --git a/tests/gateway/test_async_session_db.py b/tests/gateway/test_async_session_db.py
+index dadd8e7fbe29939a1987f2a4ba840772f1cb3092..bf614d0113b88610882fb9059fe44fe7415091d6 100644
+--- a/tests/gateway/test_async_session_db.py
++++ b/tests/gateway/test_async_session_db.py
+@@ -111,8 +111,6 @@ _ALLOWED_SYNC_DB_ESCAPES = 4
+ _OFFLOADED_SYNC_HELPERS = frozenset({
+     "_telegram_topic_mode_enabled",
+     "_is_telegram_topic_lane",
+-    "_is_telegram_topic_root_lobby",
+-    "_recover_telegram_topic_thread_id",
+     "_normalize_source_for_session_key",
+     "_record_telegram_topic_binding",
+     "_sync_telegram_topic_binding",
+@@ -318,5 +316,3 @@ async def test_concurrent_claim_handoff_single_winner(tmp_path):
+     results = await asyncio.gather(*(db.claim_handoff(sid) for _ in range(20)))
+ 
+     assert sum(results) == 1, f"exactly one claim must win, got {sum(results)}"
+-
+-
+diff --git a/tests/gateway/test_first_turn_session_meta_rebaseline.py b/tests/gateway/test_first_turn_session_meta_rebaseline.py
+index a7f3e4fb386e651d3df55579d40f3da0edd302a2..0b7ec9206c6f74da7d07f3b8b97c7c5b134ce7a0 100644
+--- a/tests/gateway/test_first_turn_session_meta_rebaseline.py
++++ b/tests/gateway/test_first_turn_session_meta_rebaseline.py
+@@ -74,7 +74,6 @@ def _bootstrap(monkeypatch, tmp_path, db):
+     from hermes_state import AsyncSessionDB
+ 
+     runner._session_db = AsyncSessionDB(db)
+-    runner._recover_telegram_topic_thread_id = lambda _source: None
+     runner._cache_session_source = lambda _key, _source: None
+     runner._is_session_run_current = lambda _key, _gen: True
+     runner._begin_session_run_generation = lambda _key: 1
+@@ -217,4 +216,3 @@ async def test_first_turn_session_meta_is_captured_by_rebaseline(
+     # And the cached agent instance must be untouched (never rebuilt).
+     assert cached[0] is agent_obj
+ 
+-
+diff --git a/tests/gateway/test_gateway_silence_tokens.py b/tests/gateway/test_gateway_silence_tokens.py
+index 0cd1d5936775e543a4c59a9fa49e699078822295..051257cd54d802ad8bd05de70007fb101ff3d380 100644
+--- a/tests/gateway/test_gateway_silence_tokens.py
++++ b/tests/gateway/test_gateway_silence_tokens.py
+@@ -43,7 +43,6 @@ def _runner(monkeypatch, tmp_path):
+     runner._set_session_env = lambda _context: None
+     runner._handle_active_session_busy_message = AsyncMock(return_value=False)
+     runner._session_db = MagicMock()
+-    runner._recover_telegram_topic_thread_id = lambda _source: None
+     runner._cache_session_source = lambda _key, _source: None
+     runner._is_session_run_current = lambda _key, _gen: True
+     runner._reply_anchor_for_event = lambda _event: None
+@@ -86,4 +85,3 @@ def test_blank_and_prose_mentions_are_not_silence():
+     assert not is_intentional_silence_response("Use NO_REPLY when no answer is needed.")
+     assert not is_intentional_silence_response("The reply was [SILENT], intentionally.")
+ 
+-
+diff --git a/tests/gateway/test_multiplex_adapter_registry.py b/tests/gateway/test_multiplex_adapter_registry.py
+index 6ee9258205e9a4e5e087e8d21029d92566b6b450..8df5c1aa78960407d4eaf9e9d02a81706b660f0b 100644
+--- a/tests/gateway/test_multiplex_adapter_registry.py
++++ b/tests/gateway/test_multiplex_adapter_registry.py
+@@ -137,7 +137,6 @@ def _secondary_recovery_runner(*, running=True):
+     runner._background_tasks = set()
+     runner.session_store = object()
+     runner._handle_active_session_busy_message = object()
+-    runner._recover_telegram_topic_thread_id = object()
+     runner._busy_text_mode = "queue"
+     runner._make_adapter_auth_check = lambda platform, profile_name=None: object()
+     runner._adapter_disconnect_timeout_secs = lambda: 0
+@@ -494,4 +493,3 @@ class TestFeishuPortBindingConditional:
+         connected = await runner._start_one_profile_adapters("reviewer", "/tmp/x", {})
+         assert connected == 0  # no error, just nothing connected
+ 
+-
 diff --git a/tests/gateway/test_projects_center.py b/tests/gateway/test_projects_center.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..848ae7c2137a78ecd798017b73bfef376116f229
+index 0000000000000000000000000000000000000000..c2ef5c69d1864a4335cc5679e2baacd8d3ed2603
 --- /dev/null
 +++ b/tests/gateway/test_projects_center.py
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,171 @@
 +import asyncio
 +from types import SimpleNamespace
 +from unittest.mock import AsyncMock
@@ -1718,6 +3492,40 @@ index 0000000000000000000000000000000000000000..848ae7c2137a78ecd798017b73bfef37
 +
 +        assert "/topic" in result
 +        assert "not enabled" in result.lower()
++
++    asyncio.run(run())
++
++
++def test_projects_new_routes_to_explicit_project_creation():
++    async def run():
++        runner = object.__new__(GatewayRunner)
++        runner._session_db = SimpleNamespace(
++            is_telegram_topic_mode_enabled=AsyncMock(return_value=True)
++        )
++        runner._create_telegram_project = AsyncMock(return_value="created")
++        event = MessageEvent(
++            text="/projects new Research", source=_source(), message_id="m1"
++        )
++
++        assert await runner._handle_projects_command(event) == "created"
++        runner._create_telegram_project.assert_awaited_once_with(event, "Research")
++
++    asyncio.run(run())
++
++
++def test_projects_new_does_not_write_when_topic_mode_is_disabled():
++    async def run():
++        runner = object.__new__(GatewayRunner)
++        runner._session_db = SimpleNamespace(
++            is_telegram_topic_mode_enabled=AsyncMock(return_value=False)
++        )
++        runner._create_telegram_project = AsyncMock()
++        event = MessageEvent(text="/projects new", source=_source(), message_id="m1")
++
++        result = await runner._handle_projects_command(event)
++
++        assert "/topic" in result
++        runner._create_telegram_project.assert_not_awaited()
 +
 +    asyncio.run(run())
 +
@@ -1814,6 +3622,107 @@ index 0000000000000000000000000000000000000000..848ae7c2137a78ecd798017b73bfef37
 +        assert "Usage: /projects [page]" in result
 +
 +    asyncio.run(run())
+diff --git a/tests/gateway/test_session.py b/tests/gateway/test_session.py
+index 9b68bbc352b184cef99ee630e1da337a7bee766b..99f520e53acb3ce0feeaa2f479c11fd4248a1e30 100644
+--- a/tests/gateway/test_session.py
++++ b/tests/gateway/test_session.py
+@@ -697,6 +697,19 @@ class TestWhatsAppSessionKeyConsistency:
+         key = build_session_key(source)
+         assert key == "agent:main:telegram:dm:99"
+ 
++    def test_telegram_general_topic_uses_the_root_dm_session_key(self):
++        """Telegram may represent General as no thread or thread 1."""
++        root = SessionSource(
++            platform=Platform.TELEGRAM,
++            chat_id="99",
++            chat_type="dm",
++            thread_id=None,
++        )
++        general = replace(root, thread_id="1")
++
++        assert build_session_key(root) == "agent:main:telegram:dm:99"
++        assert build_session_key(general) == build_session_key(root)
++
+     def test_distinct_dm_chat_ids_get_distinct_session_keys(self):
+         """Different DM chats must not collapse into one shared session."""
+         first = SessionSource(platform=Platform.TELEGRAM, chat_id="99", chat_type="dm")
+@@ -1529,4 +1542,3 @@ class TestGatewayRoutingTable:
+         assert recovered.session_id == entry.session_id
+         restarted._db.close()
+ 
+-
+diff --git a/tests/gateway/test_session_override_thread_recovery.py b/tests/gateway/test_session_override_thread_recovery.py
+index ca6016a00439b51cf88da192fd5bd721ed8ff21f..cf689f85e86d52076d3b53e59d4aea0d04b4997e 100644
+--- a/tests/gateway/test_session_override_thread_recovery.py
++++ b/tests/gateway/test_session_override_thread_recovery.py
+@@ -1,28 +1,13 @@
+-"""Regression tests for #30479 — session-scoped /model and /reasoning overrides
+-silently lost on Telegram forum/DM topics and after compression session splits.
+-
+-Root cause: ``_handle_message_with_agent`` rewrites ``source.thread_id`` via
+-``_recover_telegram_topic_thread_id`` (lobby/stripped reply -> the user's
+-last-active bound topic) *before* deriving the session key for a message turn.
+-The ``/model`` and ``/reasoning`` command handlers derived their override key
+-from the raw inbound ``event.source``, skipping that recovery — so the override
+-was stored under one key and the next message turn read a different key, and the
+-override was dropped.
+-
+-Fix: both command handlers normalize the source via
+-``_normalize_source_for_session_key`` before deriving the override key, so
+-storage and read keys are identical.
+-"""
++"""Telegram General and topic session-key normalization regressions."""
+ 
+ import threading
+-from unittest.mock import MagicMock
+ 
+ import gateway.run as gateway_run
+ from gateway.config import Platform
+ from gateway.session import SessionSource, build_session_key
+ 
+ 
+-def _make_runner(recovered_thread_id=None):
++def _make_runner():
+     runner = object.__new__(gateway_run.GatewayRunner)
+     runner.config = None
+     runner.session_store = None
+@@ -31,14 +16,11 @@ def _make_runner(recovered_thread_id=None):
+     runner._session_reasoning_overrides = {}
+     runner._agent_cache = {}
+     runner._agent_cache_lock = threading.Lock()
+-    # Stub topic recovery: returns the bound topic id for a lobby message,
+-    # None otherwise (the real method's contract).
+-    runner._recover_telegram_topic_thread_id = MagicMock(return_value=recovered_thread_id)
+     return runner
+ 
+ 
+ def _topic_dm_source(thread_id):
+-    """A Telegram DM in topic mode. thread_id="" / "1" == General/lobby."""
++    """A Telegram DM where thread 1 is the permanent General conversation."""
+     return SessionSource(
+         platform=Platform.TELEGRAM,
+         chat_id="555",
+@@ -49,15 +31,11 @@ def _topic_dm_source(thread_id):
+     )
+ 
+ 
+-def test_normalize_rewrites_lobby_thread_to_bound_topic():
+-    """A lobby (stripped) reply gets pinned to the user's bound topic id."""
+-    runner = _make_runner(recovered_thread_id="42")
+-    src = _topic_dm_source(thread_id="")  # lobby/General — no message_thread_id
++def test_normalize_keeps_general_in_the_permanent_main_session():
++    runner = _make_runner()
++    src = _topic_dm_source(thread_id="1")
+ 
+     normalized = runner._normalize_source_for_session_key(src)
+ 
+-    assert normalized.thread_id == "42"
+-    # Original source is left untouched (we return a copy).
+-    assert src.thread_id == ""
+-
+-
++    assert normalized.thread_id == "1"
++    assert build_session_key(normalized) == "agent:main:telegram:dm:555"
 diff --git a/tests/gateway/test_status_command.py b/tests/gateway/test_status_command.py
 index 799c3aa1b1c31f82e57b0e8a0439183dfb0ed56b..4f0fbab29a1731c7c9a9e782b7e41558cad73e9f 100644
 --- a/tests/gateway/test_status_command.py
@@ -1948,10 +3857,10 @@ index 799c3aa1b1c31f82e57b0e8a0439183dfb0ed56b..4f0fbab29a1731c7c9a9e782b7e41558
 -
 diff --git a/tests/gateway/test_stop_menu.py b/tests/gateway/test_stop_menu.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..974ea1b5def4986924686ca1082c3c982ae77abb
+index 0000000000000000000000000000000000000000..cfa8893f031f429ca59306e2aca12badc6ec9e0d
 --- /dev/null
 +++ b/tests/gateway/test_stop_menu.py
-@@ -0,0 +1,326 @@
+@@ -0,0 +1,329 @@
 +import asyncio
 +import time
 +import threading
@@ -2132,16 +4041,19 @@ index 0000000000000000000000000000000000000000..974ea1b5def4986924686ca1082c3c98
 +        )
 +
 +        assert response is None
-+        assert adapter.kwargs["items"] == [
-+            {
-+                "kind": "delegation",
-+                "id": "deleg_done",
-+                "label": "audit project",
-+                "state": "completed",
-+                "elapsed": 12,
-+                "detail": "No blocking issues.",
-+            }
-+        ]
++        item = adapter.kwargs["items"][0]
++        assert {
++            key: item[key]
++            for key in ("kind", "id", "label", "state", "elapsed", "detail")
++        } == {
++            "kind": "delegation",
++            "id": "deleg_done",
++            "label": "audit project",
++            "state": "completed",
++            "elapsed": 12,
++            "detail": "No blocking issues.",
++        }
++        assert item["scope_label"] == "Основной чат"
 +
 +    asyncio.run(run())
 +
@@ -2340,10 +4252,10 @@ index 384932687023d934df99c5c6f20cf471536d7294..f5b6816a183e54307a122e6c0a623851
 -
 diff --git a/tests/gateway/test_telegram_charline_menu.py b/tests/gateway/test_telegram_charline_menu.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8aeac1a8f
+index 0000000000000000000000000000000000000000..a2de0d7cb5e680783b23e93b9bd0ebe6d56e7fab
 --- /dev/null
 +++ b/tests/gateway/test_telegram_charline_menu.py
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,489 @@
 +import asyncio
 +import os
 +from types import SimpleNamespace
@@ -2439,7 +4351,7 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +    asyncio.run(run())
 +
 +
-+def test_charline_panel_renders_six_requested_buttons():
++def test_charline_panel_renders_requested_buttons():
 +    async def run():
 +        adapter = _adapter()
 +        button_patch, markup_patch = _telegram_buttons()
@@ -2460,18 +4372,25 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +            for button in row
 +        ]
 +        assert labels == [
++            "Сегодня",
++            "Новая задача",
++            "Задачи",
++            "Проекты",
 +            "Календарь",
 +            "Почта",
 +            "Файлы",
-+            "Задачи",
-+            "Проекты",
-+            "Новая задача",
++            "Расписания",
++            "Исследование",
++            "Память",
++            "Сервисы",
++            "Новый проект",
++            "Все функции Hermes",
 +        ]
 +
 +    asyncio.run(run())
 +
 +
-+def test_charline_category_edits_same_card_and_back_restores_home():
++def test_charline_submenu_edits_same_card_and_back_restores_home():
 +    async def run():
 +        adapter = _adapter()
 +        on_action = AsyncMock()
@@ -2484,14 +4403,18 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +                on_action=on_action,
 +            )
 +            menu_id = next(iter(adapter._charline_menu_state))
-+            query = _query(f"ch:{menu_id}:calendar")
++            query = _query(f"ch:{menu_id}:research")
 +            with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
 +                await adapter._handle_callback_query(
 +                    MagicMock(callback_query=query), MagicMock()
 +                )
 +            detail = query.edit_message_text.await_args.kwargs
-+            assert "Календарь" in detail["text"]
-+            assert detail["reply_markup"].inline_keyboard[0][0].text == "Назад"
++            assert "Исследование" in detail["text"]
++            assert any(
++                button.text == "Назад"
++                for row in detail["reply_markup"].inline_keyboard
++                for button in row
++            )
 +
 +            query.reset_mock()
 +            query.data = f"ch:{menu_id}:home"
@@ -2530,7 +4453,9 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +                    MagicMock(callback_query=query), MagicMock()
 +                )
 +
-+        assert "обычными словами" in query.edit_message_text.await_args.kwargs["text"]
++        prompt = adapter._bot.send_message.await_args.kwargs
++        assert "Ответьте на это сообщение" in prompt["text"]
++        assert prompt["reply_markup"] is not None
 +        on_action.assert_not_awaited()
 +
 +    asyncio.run(run())
@@ -2539,7 +4464,7 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +def test_charline_tasks_and_projects_reuse_runner_actions():
 +    async def run():
 +        adapter = _adapter()
-+        on_action = AsyncMock(side_effect=[None, "## Проекты"])
++        on_action = AsyncMock(side_effect=[None, {"section": "projects", "items": []}])
 +        adapter.send = AsyncMock()
 +        await adapter.send_charline_menu(
 +            chat_id="42",
@@ -2555,8 +4480,9 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +                MagicMock(callback_query=_query(f"ch:{menu_id}:tasks", thread_id=101)),
 +                MagicMock(),
 +            )
++            projects_query = _query(f"ch:{menu_id}:projects", thread_id=101)
 +            await adapter._handle_callback_query(
-+                MagicMock(callback_query=_query(f"ch:{menu_id}:projects", thread_id=101)),
++                MagicMock(callback_query=projects_query),
 +                MagicMock(),
 +            )
 +
@@ -2564,9 +4490,102 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +            "tasks",
 +            "projects",
 +        ]
-+        adapter.send.assert_awaited_once_with(
-+            "42", "## Проекты", metadata={"thread_id": "101"}
++        assert "Проектов пока нет" in projects_query.edit_message_text.await_args.kwargs["text"]
++        adapter.send.assert_not_awaited()
++
++    asyncio.run(run())
++
++
++def test_charline_project_card_routes_scoped_actions():
++    async def run():
++        adapter = _adapter()
++        item = {"label": "Ремонт", "thread_id": "101", "active": 2}
++        on_action = AsyncMock(side_effect=[
++            {"section": "projects", "items": [item]},
++            "Сводка готовится в проекте «Ремонт».",
++        ])
++        adapter.send = AsyncMock()
++        await adapter.send_charline_menu(
++            chat_id="42", session_key="telegram:dm:42", owner_user_id="7",
++            on_action=on_action,
 +        )
++        menu_id = next(iter(adapter._charline_menu_state))
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            projects_query = _query(f"ch:{menu_id}:projects")
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=projects_query), MagicMock()
++            )
++            assert "Ремонт" in projects_query.edit_message_text.await_args.kwargs["text"]
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=_query(f"ch:{menu_id}:project_summary_0")),
++                MagicMock(),
++            )
++
++        assert on_action.await_args_list[1].args == ("project_summary", item)
++        adapter.send.assert_awaited_once()
++
++    asyncio.run(run())
++
++
++def test_charline_memory_delete_requires_second_click_and_refreshes():
++    async def run():
++        adapter = _adapter()
++        item = {"source": "Обо мне", "target": "user", "content": "Любит чай"}
++        on_action = AsyncMock(side_effect=[
++            {"section": "memory_entries", "items": [item]},
++            {"section": "memory_entries", "items": [], "notice": "Запись удалена."},
++        ])
++        await adapter.send_charline_menu(
++            chat_id="42", session_key="telegram:dm:42", owner_user_id="7",
++            on_action=on_action,
++        )
++        menu_id = next(iter(adapter._charline_menu_state))
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=_query(f"ch:{menu_id}:memory_entries")),
++                MagicMock(),
++            )
++            delete_query = _query(f"ch:{menu_id}:memory_delete_0")
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=delete_query), MagicMock()
++            )
++            assert "Подтвердите удаление" in delete_query.edit_message_text.await_args.kwargs["text"]
++            assert on_action.await_count == 1
++            confirm_query = _query(f"ch:{menu_id}:memory_confirm_0")
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=confirm_query), MagicMock()
++            )
++
++        assert on_action.await_args_list[1].args == ("memory_remove", item)
++        assert "Запись удалена" in confirm_query.edit_message_text.await_args.kwargs["text"]
++
++    asyncio.run(run())
++
++
++def test_charline_new_project_callback_is_one_shot():
++    async def run():
++        adapter = _adapter()
++        on_action = AsyncMock(return_value="Project created")
++        adapter.send = AsyncMock()
++        await adapter.send_charline_menu(
++            chat_id="42",
++            session_key="telegram:dm:42",
++            owner_user_id="7",
++            on_action=on_action,
++        )
++        menu_id = next(iter(adapter._charline_menu_state))
++
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=_query(f"ch:{menu_id}:new_project")),
++                MagicMock(),
++            )
++            await adapter._handle_callback_query(
++                MagicMock(callback_query=_query(f"ch:{menu_id}:new_project")),
++                MagicMock(),
++            )
++
++        on_action.assert_awaited_once_with("new_project")
 +
 +    asyncio.run(run())
 +
@@ -2701,7 +4720,8 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +        }
 +        runner._check_slash_access = lambda source, command: None
 +        runner._handle_agents_command = AsyncMock(return_value=None)
-+        runner._handle_projects_command = AsyncMock(return_value="## Проекты")
++        runner._charline_project_items = AsyncMock(return_value=[{"label": "P1"}])
++        runner._create_telegram_project = AsyncMock(return_value="Проект создан")
 +        event = MessageEvent(
 +            text="/charline",
 +            source=_source("101"),
@@ -2715,9 +4735,14 @@ index 0000000000000000000000000000000000000000..366a0ce8a95cad2ba9164c897e3a37a8
 +        assert adapter.kwargs["metadata"] == {"thread_id": "101"}
 +        action = adapter.kwargs["on_action"]
 +        assert await action("tasks") is None
-+        assert await action("projects") == "## Проекты"
++        assert await action("projects") == {
++            "section": "projects",
++            "items": [{"label": "P1"}],
++        }
++        assert await action("new_project") == "Проект создан"
 +        runner._handle_agents_command.assert_awaited_once_with(event)
-+        runner._handle_projects_command.assert_awaited_once_with(event)
++        runner._charline_project_items.assert_awaited_once_with(event)
++        runner._create_telegram_project.assert_awaited_once_with(event, "")
 +
 +    asyncio.run(run())
 diff --git a/tests/gateway/test_telegram_clarify_buttons.py b/tests/gateway/test_telegram_clarify_buttons.py
@@ -2803,6 +4828,136 @@ index 7d8bdbd0d69db7f9a2d1041caca9499b7c6bc190..b84654f6b7bfa7b3cd14470d1558264d
          assert "1." in text and "apple" in text
          assert "2." in text and "banana" in text
 -
+diff --git a/tests/gateway/test_telegram_prune_stale_topic_binding_31501.py b/tests/gateway/test_telegram_prune_stale_topic_binding_31501.py
+index 97fe209e482a75b28e436a2341772c57a630dd01..3e72fa70226a07c6a38461a5c700563512dcc108 100644
+--- a/tests/gateway/test_telegram_prune_stale_topic_binding_31501.py
++++ b/tests/gateway/test_telegram_prune_stale_topic_binding_31501.py
+@@ -4,12 +4,9 @@ When a Telegram user deletes a DM topic in the client, the Bot API
+ responds to the gateway's next send with ``Thread not found``.  The
+ adapter falls back to a plain send (no ``message_thread_id``), but
+ prior to this fix it left the corresponding row in
+-``telegram_dm_topic_bindings`` untouched.
+-``gateway.run._recover_telegram_topic_thread_id`` then walked the
+-user's bindings newest-first on every later inbound message and
+-cheerfully redirected them back to the deleted topic — tool
+-progress, approvals and replies all silently landed in the wrong
+-place until the operator manually ran ``DELETE`` on ``state.db``.
++``telegram_dm_topic_bindings`` untouched, so project lists and
++session lookups kept a dead route until an operator edited
++``state.db`` manually.
+ 
+ The fix has three pieces — these tests pin all three:
+ 
+@@ -104,13 +101,10 @@ class TestDeleteTelegramTopicBinding:
+         db.close()
+ 
+ 
+-class TestPruneClearsTopicModeWhenLastBindingGone:
+-    """Proactive cleanup (#31501 follow-up): pruning the chat's final
+-    binding must also flip ``telegram_dm_topic_mode.enabled`` to 0 so
+-    recovery fully stands down — covers the user who disabled topics in
+-    the Telegram client without ever running ``/topic off``."""
++class TestPrunePreservesTopicModeWhenLastBindingGone:
++    """Zero projects does not disable the explicit project feature."""
+ 
+-    def test_clears_enabled_when_last_binding_pruned(self, tmp_path):
++    def test_keeps_enabled_when_last_binding_pruned(self, tmp_path):
+         db = SessionDB(db_path=tmp_path / "state.db")
+         db.enable_telegram_topic_mode(
+             chat_id="5595856929", user_id="5595856929",
+@@ -127,7 +121,7 @@ class TestPruneClearsTopicModeWhenLastBindingGone:
+         assert removed == 1
+         assert db.is_telegram_topic_mode_enabled(
+             chat_id="5595856929", user_id="5595856929",
+-        ) is False
++        ) is True
+         db.close()
+ 
+ 
+@@ -243,24 +237,15 @@ class TestThreadNotFoundFallbackSitesPruneBinding:
+ 
+ 
+ # ---------------------------------------------------------------------------
+-# End-to-end semantic — prune + recovery returns None for deleted topic
++# End-to-end semantic — pruning never changes the General session key
+ # ---------------------------------------------------------------------------
+ 
+ 
+-class TestRecoveryAfterPrune:
+-    """The whole point of the fix: once a topic is pruned, the
+-    GatewayRunner's ``_recover_telegram_topic_thread_id`` must no
+-    longer steer future inbound messages to it.
+-    """
++class TestGeneralRoutingAfterPrune:
++    """General never guesses a project, before or after a prune."""
+ 
+-    def test_recovery_no_longer_returns_pruned_topic(self, tmp_path):
+-        # Build the same fixture used elsewhere: two topic bindings
+-        # for the same user, then prune the most-recent one.
+-        # ``_recover_telegram_topic_thread_id`` walks bindings
+-        # newest-first, so without the prune it would pick the
+-        # one we just removed.
+-        from gateway.config import GatewayConfig, Platform, PlatformConfig
+-        from gateway.run import GatewayRunner
++    def test_prune_does_not_change_general_session_key(self, tmp_path):
++        from gateway.config import Platform
+         from gateway.session import SessionSource, build_session_key
+ 
+         db = SessionDB(db_path=tmp_path / "state.db")
+@@ -288,45 +273,23 @@ class TestRecoveryAfterPrune:
+                 session_id=sid,
+             )
+ 
+-        runner = object.__new__(GatewayRunner)
+-        runner.config = GatewayConfig(
+-            platforms={
+-                Platform.TELEGRAM: PlatformConfig(enabled=True, token="***"),
+-            }
+-        )
+-        runner._session_db = db
+-        runner._telegram_topic_mode_enabled = lambda _src: True
+-
+-        # Sanity: before the prune, recovery picks "222" (newest).
+-        # Recovery only fires for a lobby-shaped inbound (omitted
+-        # message_thread_id or General topic "1"); a non-lobby
+-        # unknown thread is preserved as a brand-new topic. Use the
+-        # General topic id so the recovery walk actually runs.
+-        before = runner._recover_telegram_topic_thread_id(SessionSource(
++        # General is stable even while multiple project bindings exist.
++        general = SessionSource(
+             platform=Platform.TELEGRAM,
+             user_id="5595856929",
+             chat_id="5595856929",
+             user_name="tester",
+             chat_type="dm",
+-            thread_id="1",  # General/stripped reply — triggers recovery
+-        ))
+-        assert before == "222"
++            thread_id="1",
++        )
++        before = build_session_key(general)
++        assert before == "agent:main:telegram:dm:5595856929"
+ 
+         # User deletes topic 222 in Telegram → adapter prunes.
+         db.delete_telegram_topic_binding(
+             chat_id="5595856929", thread_id="222",
+         )
+ 
+-        # Now recovery falls back to topic 111 (the surviving
+-        # binding) instead of the dead one.  This is the exact
+-        # behaviour change the bug report asks for.
+-        after = runner._recover_telegram_topic_thread_id(SessionSource(
+-            platform=Platform.TELEGRAM,
+-            user_id="5595856929",
+-            chat_id="5595856929",
+-            user_name="tester",
+-            chat_type="dm",
+-            thread_id="1",
+-        ))
+-        assert after == "111"
++        # Pruning changes the project list, never General routing.
++        assert build_session_key(general) == before
+         db.close()
 diff --git a/tests/gateway/test_telegram_stop_menu.py b/tests/gateway/test_telegram_stop_menu.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..4b2424cc7fe8676d046333a97e939d08229bf346
@@ -3170,6 +5325,201 @@ index 0000000000000000000000000000000000000000..4b2424cc7fe8676d046333a97e939d08
 +        assert "not authorized" in query.answer.await_args.kwargs["text"].lower()
 +
 +    asyncio.run(run())
+diff --git a/tests/gateway/test_telegram_topic_mode.py b/tests/gateway/test_telegram_topic_mode.py
+index c61a706f495a9dedef9e766868d2df8406ff484a..4ffb507e6075bd5558e74c8161d87bd6960ab59b 100644
+--- a/tests/gateway/test_telegram_topic_mode.py
++++ b/tests/gateway/test_telegram_topic_mode.py
+@@ -1,7 +1,7 @@
+ """Tests for Telegram private-chat topic-mode routing.
+ 
+-Topic mode makes the root Telegram DM a system lobby while user-created
+-Telegram topics act as independent Hermes session lanes.
++General is the permanent main session; explicit project topics are independent
++Hermes session lanes.
+ """
+ 
+ from datetime import datetime
+@@ -62,7 +62,7 @@ def _make_runner(session_db=None):
+         platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="***")}
+     )
+     adapter = MagicMock()
+-    adapter.send = AsyncMock()
++    adapter.send = AsyncMock(return_value=SimpleNamespace(success=True))
+     adapter.send_image_file = AsyncMock()
+     adapter._bot = None
+     adapter._create_dm_topic = AsyncMock(return_value=None)
+@@ -190,14 +190,13 @@ async def test_internal_root_telegram_dm_event_bypasses_topic_lobby(
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_root_telegram_dm_new_shows_create_topic_instruction(monkeypatch):
++async def test_root_telegram_dm_new_resets_the_main_session(monkeypatch):
+     import gateway.run as gateway_run
+ 
+     runner = _make_runner()
+     runner._telegram_topic_mode_enabled = lambda source: True
+-    runner._run_agent = AsyncMock(
+-        side_effect=AssertionError("/new in root Telegram DM must not start an agent")
+-    )
++    runner._handle_reset_command = AsyncMock(return_value="main reset")
++    runner._maybe_confirm_destructive_slash = AsyncMock(return_value="main reset")
+ 
+     monkeypatch.setattr(
+         gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "***"}
+@@ -205,12 +204,97 @@ async def test_root_telegram_dm_new_shows_create_topic_instruction(monkeypatch):
+ 
+     result = await runner._handle_message(_make_event("/new"))
+ 
+-    assert "create a new topic" in result
+-    assert "All Messages" in result
+-    assert "Use /new inside" in result
+-    runner._run_agent.assert_not_called()
+-    runner.session_store.reset_session.assert_not_called()
++    assert result == "main reset"
++    runner._maybe_confirm_destructive_slash.assert_awaited_once()
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("thread_id", [None, "1"])
++async def test_general_user_message_reaches_the_main_agent(monkeypatch, thread_id):
++    import gateway.run as gateway_run
++
++    runner = _make_runner()
++    runner._telegram_topic_mode_enabled = lambda source: True
++    runner._handle_message_with_agent = AsyncMock(return_value="main response")
++
++    monkeypatch.setattr(
++        gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "***"}
++    )
++
++    result = await runner._handle_message(_make_event("hello", thread_id=thread_id))
++
++    assert result == "main response"
++    assert runner._handle_message_with_agent.await_count == 1
++
++
++@pytest.mark.asyncio
++async def test_create_project_uses_existing_topic_session_and_binding():
++    from gateway.run import GatewayRunner
++
++    runner = object.__new__(GatewayRunner)
++    adapter = MagicMock()
++    adapter.create_handoff_thread = AsyncMock(return_value="808")
++    adapter.send = AsyncMock(return_value=SimpleNamespace(success=True))
++    runner._adapter_for_source = lambda source: adapter
++    entry = SessionEntry(
++        session_key="agent:main:telegram:dm:208214988:808",
++        session_id="project-session",
++        created_at=datetime.now(),
++        updated_at=datetime.now(),
++        platform=Platform.TELEGRAM,
++        chat_type="dm",
++        origin=_make_source(thread_id="808"),
++    )
++    runner.session_store = SimpleNamespace(
++        get_or_create_session=MagicMock(return_value=entry)
++    )
++    runner._session_db = AsyncMock()
++    runner._session_db.is_telegram_topic_mode_enabled.return_value = True
++
++    result = await runner._create_telegram_project(
++        _make_event("/projects new Roadmap"), "Roadmap"
++    )
++
++    adapter.create_handoff_thread.assert_awaited_once_with("208214988", "Roadmap")
++    created_source = runner.session_store.get_or_create_session.call_args.args[0]
++    assert created_source.thread_id == "808"
++    runner._session_db.bind_telegram_topic.assert_awaited_once_with(
++        chat_id="208214988",
++        thread_id="808",
++        user_id="208214988",
++        session_key=entry.session_key,
++        session_id=entry.session_id,
++    )
++    runner._session_db.set_session_title.assert_awaited_once_with(
++        entry.session_id, "Roadmap"
++    )
++    adapter.send.assert_awaited_once()
++    assert adapter.send.await_args.kwargs["metadata"] == {
++        "thread_id": "808",
++        "telegram_dm_topic_created_for_send": True,
++    }
++    assert "Roadmap" in result
++
++
++@pytest.mark.asyncio
++async def test_create_project_api_failure_creates_no_session_or_binding():
++    from gateway.run import GatewayRunner
++
++    runner = object.__new__(GatewayRunner)
++    adapter = MagicMock()
++    adapter.create_handoff_thread = AsyncMock(return_value=None)
++    adapter.send = AsyncMock()
++    runner._adapter_for_source = lambda source: adapter
++    runner.session_store = SimpleNamespace(get_or_create_session=MagicMock())
++    runner._session_db = AsyncMock()
++    runner._session_db.is_telegram_topic_mode_enabled.return_value = True
++
++    result = await runner._create_telegram_project(_make_event("/projects new"), "")
++
++    assert "could not" in result.lower()
+     runner.session_store.get_or_create_session.assert_not_called()
++    runner._session_db.bind_telegram_topic.assert_not_awaited()
++    adapter.send.assert_not_awaited()
+ 
+ 
+ @pytest.mark.asyncio
+@@ -512,8 +596,10 @@ async def test_topic_root_command_lists_unlinked_sessions_for_restore(tmp_path,
+     assert "Old research" in result
+     assert "old-unlinked" in result
+     assert "Send /topic old-unlinked inside a topic" in result
++    assert "General is your permanent main assistant chat" in result
+     assert "Already linked" not in result
+     assert "other-user" not in result
++    runner.adapters[Platform.TELEGRAM]._create_dm_topic.assert_not_awaited()
+     runner._run_agent.assert_not_called()
+ 
+ 
+@@ -684,7 +770,7 @@ def _seed_two_topic_bindings(session_db):
+     )
+ 
+ 
+-def test_recover_preserves_unknown_thread_id_for_new_topic(tmp_path):
++def test_normalize_preserves_unknown_thread_id_for_new_topic(tmp_path):
+     # A newly-created Telegram DM topic arrives with a real, previously-unbound
+     # message_thread_id. It must become its own session lane rather than being
+     # rewritten to whichever older topic was most recently active.
+@@ -692,10 +778,12 @@ def test_recover_preserves_unknown_thread_id_for_new_topic(tmp_path):
+     _seed_two_topic_bindings(db)
+     runner = _make_runner(session_db=db)
+ 
+-    assert runner._recover_telegram_topic_thread_id(_make_source(thread_id="9999")) is None
++    source = _make_source(thread_id="9999")
++    assert runner._normalize_source_for_session_key(source) is source
++    assert build_session_key(source).endswith(":9999")
+ 
+ 
+-def test_recover_returns_none_for_brand_new_topic(tmp_path):
++def test_brand_new_topic_keeps_its_own_session_key(tmp_path):
+     # Regression for #31086: bindings exist for a prior topic but the user
+     # opened a fresh one (thread_id "99999"). Recovery must return None so the
+     # new topic gets its own session rather than being silently merged into
+@@ -717,7 +805,9 @@ def test_recover_returns_none_for_brand_new_topic(tmp_path):
+     runner = _make_runner(session_db=db)
+ 
+     # "99999" is non-lobby and not in the binding table — brand-new topic.
+-    assert runner._recover_telegram_topic_thread_id(_make_source(thread_id="99999")) is None
++    source = _make_source(thread_id="99999")
++    assert runner._normalize_source_for_session_key(source) is source
++    assert build_session_key(source).endswith(":99999")
+ 
+ 
+ def test_list_telegram_topic_bindings_for_chat_no_table(tmp_path):
+@@ -761,4 +851,3 @@ def test_get_telegram_topic_binding_by_session_returns_binding(tmp_path):
+ # ---------------------------------------------------------------------------
+ # Test for session-split thread_id recovery (issue #27166)
+ # ---------------------------------------------------------------------------
+-
 diff --git a/tests/hermes_cli/test_commands.py b/tests/hermes_cli/test_commands.py
 index 580de148bc04d21fdb1983a5f118659c58dac13c..e76ea4e9d8ab19bf93caa06d7f2715756993576a 100644
 --- a/tests/hermes_cli/test_commands.py

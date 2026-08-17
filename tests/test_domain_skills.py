@@ -66,10 +66,11 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "задачи",
             "проекты",
             "новая задача",
+            "новый проект",
             "same card",
             "existing task center",
-            "existing project center",
-            "does not start a google operation",
+            "native owned-project card",
+            "no category click performs an external write",
             "stale web app button",
         ):
             self.assertIn(phrase, text)
@@ -111,6 +112,11 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "do not enable topic mode automatically",
             "root direct message",
             "/projects",
+            "general is the permanent main session",
+            "create projects only explicitly",
+            "/projects new [name]",
+            "background result returns to its originating session",
+            "each session compacts independently",
             "recent results",
             "needs input",
         ):
