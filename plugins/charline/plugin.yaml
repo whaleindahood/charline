@@ -4,7 +4,7 @@ description: "Conversation-first Telegram Main/project UX for Charline."
 author: Charline
 capabilities:
   - gateway.platform_actions
-hooks:
+provides_hooks:
   - pre_gateway_dispatch
   - gateway_platform_event
 provides_tools:
