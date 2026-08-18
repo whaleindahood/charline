@@ -17,13 +17,13 @@ from plugins.charline.projects import (
 )
 
 
-def _source(*, thread_id=None):
+def _source(*, thread_id=None, chat_type="dm"):
     return SimpleNamespace(
         platform=SimpleNamespace(value="telegram"),
         chat_id="123",
         thread_id=thread_id,
         user_id="42",
-        chat_type="dm",
+        chat_type=chat_type,
     )
 
 
@@ -34,14 +34,23 @@ class FakeUiData:
         self.memories = []
         self.pending_by_session = {}
         self.calls = []
+        self.tasks_available = True
+        self.schedules_available = True
+        self.memory_available = True
 
     def tasks(self, session_key):
+        if not self.tasks_available:
+            return None
         return list(self.tasks_by_session.get(session_key, []))
 
     def schedules(self, source):
+        if not self.schedules_available:
+            return None
         return list(self.schedules_by_thread.get(str(source.thread_id or ""), []))
 
     def memory_entries(self):
+        if not self.memory_available:
+            return None
         return list(self.memories)
 
     def pending_count(self, session_key):
@@ -228,6 +237,14 @@ def test_charline_menu_uses_origin_thread_and_owner() -> None:
     assert kwargs["owner_user_id"] == "42"
 
 
+def test_charline_ui_is_private_chat_only() -> None:
+    plugin = CharlinePlugin(SimpleNamespace(platform_actions=MagicMock()))
+    plugin.capture_request(SimpleNamespace(source=_source(chat_type="group")), MagicMock())
+
+    with pytest.raises(RuntimeError, match="личном чате"):
+        asyncio.run(plugin.settings_command(""))
+
+
 def test_main_home_is_compact_and_conversation_first() -> None:
     data = FakeUiData()
     data.tasks_by_session["main"] = [{"id": "d1", "label": "Анализ", "state": "running"}]
@@ -244,6 +261,11 @@ def test_main_home_is_compact_and_conversation_first() -> None:
     ):
         assert obsolete not in labels
 
+    empty = CharlineUi(
+        ProjectService(MagicMock(), lambda: {}), FakeUiData(), lambda _source: "main"
+    ).home(_source())
+    assert "Напишите, что нужно" in empty["text"]
+
 
 def test_project_home_is_scoped_to_exact_native_topic() -> None:
     config = {"platforms": {"telegram": {"extra": {"dm_topics": [
@@ -254,6 +276,7 @@ def test_project_home_is_scoped_to_exact_native_topic() -> None:
         {"id": "d1", "label": "Смета", "state": "running"},
         {"id": "d2", "label": "План", "state": "waiting"},
     ]
+    data.schedules_by_thread["77"] = [{"id": "job1", "name": "План недели"}]
     ui = CharlineUi(
         ProjectService(MagicMock(), lambda: config),
         data,
@@ -265,7 +288,8 @@ def test_project_home_is_scoped_to_exact_native_topic() -> None:
 
     assert "Charline · Проект" in card["text"]
     assert "Apartment" in card["text"]
-    assert labels == ["Сводка", "Задачи", "Расписания", "Управление"]
+    assert "1 расписание" in card["text"]
+    assert labels == ["Задачи", "Расписания"]
     assert "Проекты" not in labels
 
 
@@ -274,12 +298,13 @@ def test_today_has_conversational_empty_state_and_dynamic_actions() -> None:
     ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
 
     empty = ui.today(_source())
-    assert "На сегодня ничего срочного" in empty["text"]
+    assert "Активных задач и расписаний в этом чате нет" in empty["text"]
+    assert "ничего срочного" not in empty["text"]
     assert all("Почта" not in button["label"] for row in empty["buttons"] for button in row)
 
     data.tasks_by_session["main"] = [{"id": "d1", "label": "Анализ", "state": "running"}]
     active = ui.today(_source())
-    assert any(button["action"] == "tasks" for row in active["buttons"] for button in row)
+    assert any(button["action"] == "today.tasks" for row in active["buttons"] for button in row)
 
 
 def test_projects_view_owns_new_project_and_summary_is_read_only() -> None:
@@ -292,8 +317,9 @@ def test_projects_view_owns_new_project_and_summary_is_read_only() -> None:
 
     project_list = ui.projects(_source())
     labels = [button["label"] for row in project_list["buttons"] for button in row]
-    assert "＋ Новый проект" in labels
-    assert "＋ Новый проект" not in [
+    assert "Сводка · Alpha" in labels
+    assert "Как создать проект" in labels
+    assert "Как создать проект" not in [
         button["label"] for row in ui.home(_source())["buttons"] for button in row
     ]
 
@@ -369,6 +395,48 @@ def test_tasks_are_current_scope_only_and_hide_fast_foreground_work() -> None:
     assert "Чужой проект" not in main["text"]
 
 
+def test_realistic_long_entity_ids_keep_callback_actions_short() -> None:
+    data = FakeUiData()
+    long_id = "entity-" + "x" * 80
+    data.tasks_by_session["main"] = [
+        {"id": long_id, "kind": "delegation", "label": "Исследование", "state": "running"}
+    ]
+    data.schedules_by_thread[""] = [{
+        "id": long_id, "name": "Утренний план", "enabled": True, "display": "08:30"
+    }]
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+
+    cards = [ui.tasks(_source()), ui.schedules(_source())]
+    actions = [button["action"] for card in cards for row in card["buttons"] for button in row]
+
+    assert all(len(action) <= 36 for action in actions)
+    assert long_id not in " ".join(actions)
+
+
+def test_task_states_are_human_readable_and_single_stop_is_confirmed() -> None:
+    data = FakeUiData()
+    data.tasks_by_session["main"] = [
+        {"id": "d1", "kind": "delegation", "label": "Отчёт", "state": "finalizing"},
+        {"id": "d2", "kind": "delegation", "label": "Поиск", "state": "stalling"},
+    ]
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+    context = ui.context(_source())
+
+    card = ui.tasks(_source())
+    assert "завершается" in card["text"]
+    assert "задерживается" in card["text"]
+
+    stop_action = next(
+        button["action"] for row in card["buttons"] for button in row
+        if button["label"].startswith("Остановить · Отчёт")
+    )
+    preview = ui.handle(stop_action, context)
+    assert "Отчёт" in preview["text"]
+    assert data.calls == []
+    ui.handle(preview["buttons"][0][0]["action"], context)
+    assert ("stop_task", "main", "delegation", "d1") in data.calls
+
+
 def test_schedules_list_details_and_settings_memory_are_reconstructable() -> None:
     data = FakeUiData()
     data.schedules_by_thread[""] = [{
@@ -381,12 +449,17 @@ def test_schedules_list_details_and_settings_memory_are_reconstructable() -> Non
 
     schedules = ui.schedules(_source())
     assert "Утренний план" in schedules["text"]
+    assert "Как создать расписание" in [
+        button["label"] for row in schedules["buttons"] for button in row
+    ]
     detail = ui.handle("schedule.job123", ui.context(_source()))
+    assert "Когда: будни · 08:30" in detail["text"]
     assert "Следующий запуск: завтра, 08:30" in detail["text"]
+    assert "сегодня · успешно" in detail["text"]
 
     settings = ui.settings(_source())
     labels = [button["label"] for row in settings["buttons"] for button in row]
-    assert labels == ["Память", "Расширенное", "Назад"]
+    assert labels == ["Память", "Системные команды", "Назад"]
     memory = ui.handle("memory", ui.context(_source()))
     assert "Часовой пояс" in memory["text"]
     assert "Запомнить" not in memory["text"]
@@ -436,9 +509,76 @@ def test_stop_all_schedule_delete_and_memory_delete_require_confirmation() -> No
 
     memory_preview = ui.handle("memory_delete.user.abc", context)
     assert not any(call[0] == "memory" for call in data.calls)
+    assert "Москва" in memory_preview["text"]
     ui.handle(memory_preview["buttons"][0][0]["action"], context)
     assert ("memory", "user", "abc") in data.calls
     assert data.memories == []
+
+
+@pytest.mark.parametrize(
+    ("action", "verb"),
+    [
+        ("schedule_pause.job1", "pause"),
+        ("schedule_resume.job1", "resume"),
+        ("schedule_run.job1", "run"),
+    ],
+)
+def test_every_schedule_mutation_requires_confirmation(action, verb) -> None:
+    data = FakeUiData()
+    data.schedules_by_thread[""] = [{
+        "id": "job1", "name": "План", "enabled": verb == "resume", "display": "08:30"
+    }]
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+    context = ui.context(_source())
+
+    preview = ui.handle(action, context)
+
+    assert data.calls == []
+    confirm_action = preview["buttons"][0][0]["action"]
+    assert confirm_action.startswith("schedule_confirm.")
+    ui.handle(confirm_action, context)
+    assert ("schedule", "", "job1", verb) in data.calls
+    if verb == "run":
+        result = ui.handle(action, context)
+        result = ui.handle(result["buttons"][0][0]["action"], context)
+        assert "Запуск поставлен в очередь" in result["text"]
+
+
+def test_pending_decision_points_back_to_the_original_question() -> None:
+    data = FakeUiData()
+    data.pending_by_session["main"] = 1
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+
+    card = ui.tasks(_source())
+
+    assert "Вернитесь к сообщению с вопросом выше" in card["text"]
+
+
+def test_read_failures_are_not_reported_as_empty_state() -> None:
+    data = FakeUiData()
+    data.tasks_available = False
+    data.schedules_available = False
+    data.memory_available = False
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+
+    assert "Не удалось загрузить задачи" in ui.tasks(_source())["text"]
+    assert "Не удалось загрузить расписания" in ui.schedules(_source())["text"]
+    assert "Не удалось загрузить память" in ui.memory(_source())["text"]
+
+
+def test_today_drill_down_returns_to_today() -> None:
+    data = FakeUiData()
+    data.tasks_by_session["main"] = [
+        {"id": "d1", "kind": "delegation", "label": "Работа", "state": "running"}
+    ]
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+    context = ui.context(_source())
+
+    today = ui.today(_source())
+    action = today["buttons"][0][0]["action"]
+    tasks = ui.handle(action, context)
+
+    assert tasks["buttons"][-1][0] == {"label": "Назад", "action": "today"}
 
 
 def test_daily_ui_has_no_generic_force_reply_launchers() -> None:
@@ -468,3 +608,18 @@ def test_ui_callback_reconstructs_exact_callback_chat_and_thread() -> None:
         platform="telegram", event_type="plugin_callback",
         payload={"plugin": "other", "action": "home"},
     ) is None
+
+
+def test_group_callback_cannot_reveal_private_memory() -> None:
+    data = FakeUiData()
+    data.memories = [{"target": "user", "content": "private value", "digest": "abc"}]
+    plugin = CharlinePlugin(
+        SimpleNamespace(platform_actions=MagicMock()), data=data, config_loader=lambda: {}
+    )
+
+    card = plugin.ui_callback("memory", {
+        "platform": "telegram", "chat_id": "123", "chat_type": "group", "user_id": "42"
+    })
+
+    assert "личном чате" in card["text"]
+    assert "private value" not in card["text"]

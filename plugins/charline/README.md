@@ -2,6 +2,8 @@
 
 This standalone plugin adds contextual `/charline`, `/today`, `/projects`, `/schedules`, `/settings`, the Telegram Task Center and `charline_projects` through Hermes extension points. It does not own polling, routing, sessions, memory, cron or workers.
 
+The Charline UI is private-chat only. Cards use short deterministic references for Hermes entities, while every task interruption, schedule mutation and memory deletion shows an exact owner/chat/thread-bound confirmation before the write.
+
 Install from this repository's subdirectory at an immutable commit, enable `charline`, and explicitly grant `gateway.platform_actions`. Telegram Threaded Mode must be enabled and `platforms.telegram.extra.ignore_root_dm` must remain false.
 
 Project creation is two-step: `/projects new <name>` returns an exact preview and one-use confirmation command; only `/projects confirm <digest>` calls Hermes' native topic action. The confirmation is consumed before the write. An unknown outcome is never retried automatically and requires manual Telegram/`dm_topics` reconciliation.

@@ -1,5 +1,5 @@
 diff --git a/gateway/run.py b/gateway/run.py
-index 1439cc601ab6a6526e97914a92eaaee5b2802811..c736cbea03de8f56d556bd888a831b37a3d4dd4c 100644
+index 1439cc601..c736cbea0 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -15193,19 +15193,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
@@ -28,7 +28,7 @@ index 1439cc601ab6a6526e97914a92eaaee5b2802811..c736cbea03de8f56d556bd888a831b37
      def _make_profile_platform_event_handler(self, profile_name: str):
          """Bind platform-event auth and hook dispatch to one multiplex profile."""
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index 350ee7411c05d50592a44655770572a8d8d6ba5c..19c159d709467a4c8871a050ae8c43c6fdcdb71e 100644
+index 350ee7411..19c159d70 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -769,13 +769,40 @@ def _telegram_command_menu_config() -> dict[str, Any]:
@@ -93,7 +93,7 @@ index 350ee7411c05d50592a44655770572a8d8d6ba5c..19c159d709467a4c8871a050ae8c43c6
  
  
 diff --git a/hermes_cli/platform_actions.py b/hermes_cli/platform_actions.py
-index 52e0b68fce5a9918f946de5bfa468f4d95cdbac9..82c819f724375edc2e886ec4ecddc8285d7dd838 100644
+index 52e0b68fc..82c819f72 100644
 --- a/hermes_cli/platform_actions.py
 +++ b/hermes_cli/platform_actions.py
 @@ -16,8 +16,10 @@ v1 verb set
@@ -211,7 +211,7 @@ index 52e0b68fce5a9918f946de5bfa468f4d95cdbac9..82c819f724375edc2e886ec4ecddc828
  
      @staticmethod
 diff --git a/hermes_cli/plugin_capabilities.py b/hermes_cli/plugin_capabilities.py
-index c474ea037d1639877a3604d9e358b373e2d5c929..0a591db4efc9c9726c608f26f07dcce0f7e6722d 100644
+index c474ea037..0a591db4e 100644
 --- a/hermes_cli/plugin_capabilities.py
 +++ b/hermes_cli/plugin_capabilities.py
 @@ -125,7 +125,8 @@ CAPABILITY_REGISTRY: Dict[str, CapabilitySpec] = {
@@ -225,7 +225,7 @@ index c474ea037d1639877a3604d9e358b373e2d5c929..0a591db4efc9c9726c608f26f07dcce0
          ),
      )
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f0e6de276 100644
+index 84332a69e..cc80dd74d 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -6429,6 +6429,7 @@ class TelegramAdapter(BasePlatformAdapter):
@@ -236,7 +236,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
      ) -> SendResult:
          """Send a flat inline-keyboard choice picker (one tap → one value).
  
-@@ -6473,22 +6474,165 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6473,22 +6474,175 @@ class TelegramAdapter(BasePlatformAdapter):
                  **self._link_preview_kwargs(),
              )
  
@@ -383,12 +383,22 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
 +                parse_mode=ParseMode.MARKDOWN_V2,
 +                reply_markup=keyboard,
 +            )
-+        except Exception:
-+            await query.edit_message_text(
-+                text=str(result.get("text") or ""),
-+                parse_mode=None,
-+                reply_markup=keyboard,
-+            )
++        except Exception as exc:
++            if "not modified" in str(exc).lower():
++                await query.answer()
++                return
++            try:
++                await query.edit_message_text(
++                    text=str(result.get("text") or ""),
++                    parse_mode=None,
++                    reply_markup=keyboard,
++                )
++            except Exception as fallback_exc:
++                if "not modified" in str(fallback_exc).lower():
++                    await query.answer()
++                    return
++                await query.answer(text="Не удалось обновить этот раздел.")
++                return
 +        await query.answer()
 +
      async def _handle_choice_picker_callback(
@@ -404,7 +414,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
          if not state:
              await query.answer(text="Picker expired — run the command again.")
              return
-@@ -6496,7 +6640,6 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6496,7 +6650,6 @@ class TelegramAdapter(BasePlatformAdapter):
          # Same authorization gate as approval buttons: unauthorized users in a
          # shared group must not flip session/config state via someone else's
          # picker message.
@@ -412,7 +422,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
          query_chat = getattr(query_message, "chat", None)
          if not self._is_callback_user_authorized(
              str(getattr(query.from_user, "id", "")),
-@@ -6508,6 +6651,12 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6508,6 +6661,12 @@ class TelegramAdapter(BasePlatformAdapter):
              await query.answer(text="⛔ You are not authorized to change this setting.")
              return
  
@@ -425,7 +435,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
          try:
              idx = int(data[3:])
              choice = state["choices"][idx]
-@@ -6540,7 +6689,12 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6540,7 +6699,12 @@ class TelegramAdapter(BasePlatformAdapter):
              except Exception:
                  pass
          await query.answer()
@@ -439,7 +449,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
  
      _MODEL_PAGE_SIZE = 8
  
-@@ -7031,6 +7185,11 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -7031,6 +7195,11 @@ class TelegramAdapter(BasePlatformAdapter):
                  await self._handle_model_picker_callback(query, data, chat_id)
              return
  
@@ -451,7 +461,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
          # --- Generic choice picker callbacks (/reasoning, /fast) ---
          if data.startswith("cp:"):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -9546,6 +9705,8 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9546,6 +9715,8 @@ class TelegramAdapter(BasePlatformAdapter):
  
          event = self._build_message_event(msg, MessageType.COMMAND, update_id=update.update_id)
          event.text = self._clean_bot_trigger_text(event.text)
@@ -462,7 +472,7 @@ index 84332a69eefeebf77aa27a4c3d73335a925cae6b..dd619d3e5d589996f245ebd71677587f
          # Telegram clients split messages above 4096 chars into multiple
 diff --git a/tests/gateway/test_choice_picker_scope.py b/tests/gateway/test_choice_picker_scope.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..7a71499e858fbdadb39efef93635deb6d75f72a1
+index 000000000..7a71499e8
 --- /dev/null
 +++ b/tests/gateway/test_choice_picker_scope.py
 @@ -0,0 +1,54 @@
@@ -522,10 +532,10 @@ index 0000000000000000000000000000000000000000..7a71499e858fbdadb39efef93635deb6
 +    assert TelegramAdapter._choice_picker_key("123", "77") == "123:77"
 diff --git a/tests/gateway/test_plugin_action_card.py b/tests/gateway/test_plugin_action_card.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..0dda5c4246ebd79aa7e66d0cbac9c20cff56ee69
+index 000000000..f6f2fc4a3
 --- /dev/null
 +++ b/tests/gateway/test_plugin_action_card.py
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,87 @@
 +from types import SimpleNamespace
 +from unittest.mock import AsyncMock, MagicMock
 +
@@ -580,6 +590,20 @@ index 0000000000000000000000000000000000000000..0dda5c4246ebd79aa7e66d0cbac9c20c
 +
 +
 +@pytest.mark.asyncio
++async def test_plugin_card_treats_unchanged_refresh_as_success():
++    adapter = _adapter()
++    query = _query()
++    query.edit_message_text = AsyncMock(
++        side_effect=RuntimeError("Message is not modified")
++    )
++
++    await adapter._handle_plugin_card_callback(query, query.data)
++
++    query.edit_message_text.assert_awaited_once()
++    query.answer.assert_awaited_once_with()
++
++
++@pytest.mark.asyncio
 +async def test_plugin_card_rejects_another_authorized_user():
 +    adapter = _adapter()
 +    query = _query(user_id="99")
@@ -600,7 +624,7 @@ index 0000000000000000000000000000000000000000..0dda5c4246ebd79aa7e66d0cbac9c20c
 +
 +    query.answer.assert_awaited_once_with(text="Не удалось открыть этот раздел.")
 diff --git a/tests/hermes_cli/test_commands.py b/tests/hermes_cli/test_commands.py
-index dc0b6e9b59e58733b25a97dc5238b91bed429e1b..07176aafdb5fd852e6f6c12e4df9763214c9d49e 100644
+index dc0b6e9b5..07176aafd 100644
 --- a/tests/hermes_cli/test_commands.py
 +++ b/tests/hermes_cli/test_commands.py
 @@ -26,6 +26,7 @@ from hermes_cli.commands import (
@@ -649,7 +673,7 @@ index dc0b6e9b59e58733b25a97dc5238b91bed429e1b..07176aafdb5fd852e6f6c12e4df97632
  
  
 diff --git a/tests/hermes_cli/test_platform_actions.py b/tests/hermes_cli/test_platform_actions.py
-index c32bdad9cd18cf3b8a3860f10fefb883b8cf7911..468194a0f9882b4699b3ef8fa099d4ac97a0f561 100644
+index c32bdad9c..468194a0f 100644
 --- a/tests/hermes_cli/test_platform_actions.py
 +++ b/tests/hermes_cli/test_platform_actions.py
 @@ -45,6 +45,10 @@ def _telegram_adapter(connected=True):
@@ -742,7 +766,7 @@ index c32bdad9cd18cf3b8a3860f10fefb883b8cf7911..468194a0f9882b4699b3ef8fa099d4ac
          actions = PlatformActions("p")
          adapter = _telegram_adapter()
 diff --git a/tests/tools/test_async_delegation.py b/tests/tools/test_async_delegation.py
-index d91ff87990341f6ddb45b0ee20ab3ecc02c5ada1..eda479812028d6e0287772690512e8a4510ac58b 100644
+index d91ff8799..eda479812 100644
 --- a/tests/tools/test_async_delegation.py
 +++ b/tests/tools/test_async_delegation.py
 @@ -261,6 +261,22 @@ def test_interrupt_all_signals_running_children():
@@ -774,7 +798,7 @@ index d91ff87990341f6ddb45b0ee20ab3ecc02c5ada1..eda479812028d6e0287772690512e8a4
      assert banner_pos > clean_pos
 -
 diff --git a/tools/async_delegation.py b/tools/async_delegation.py
-index 4965363a07eef18ee921279acb6c7da387529975..3eff5f7139a696836404ce83fdc1780c7a7933c9 100644
+index 4965363a0..3eff5f713 100644
 --- a/tools/async_delegation.py
 +++ b/tools/async_delegation.py
 @@ -1585,6 +1585,27 @@ def interrupt_for_session(
@@ -806,7 +830,7 @@ index 4965363a07eef18ee921279acb6c7da387529975..3eff5f7139a696836404ce83fdc1780c
      """Test-only: clear all state and tear down the executor + monitor."""
      global _executor, _executor_max_workers, _monitor_thread
 diff --git a/website/docs/user-guide/features/plugins.md b/website/docs/user-guide/features/plugins.md
-index 7c1979482c3429d42360885db19df6f421031fa9..652103318640488fea76bbae27d2296dd318f913 100644
+index 7c1979482..652103318 100644
 --- a/website/docs/user-guide/features/plugins.md
 +++ b/website/docs/user-guide/features/plugins.md
 @@ -413,7 +413,7 @@ default**: every call re-checks the `gateway.platform_actions` capability

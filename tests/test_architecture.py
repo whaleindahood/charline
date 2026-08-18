@@ -73,6 +73,8 @@ def test_hermes_patch_is_pinned_and_carries_runtime_tests():
     assert "plugin_callback" in patch
     assert "command_menu" in patch
     assert "interrupt_delegation" in patch
+    assert "test_plugin_card_treats_unchanged_refresh_as_success" in patch
+    assert 'if "not modified" in str(exc).lower()' in patch
     assert "gateway/slash_commands.py" not in patch
 
 

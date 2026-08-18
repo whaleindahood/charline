@@ -6,6 +6,7 @@ import secrets
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -53,16 +54,23 @@ def _source_with_thread(source: Any, thread_id: str | None) -> Any:
         return SimpleNamespace(**values)
 
 
+def _entity_ref(kind: str, entity_id: str) -> str:
+    return sha256(f"{kind}\0{entity_id}".encode()).hexdigest()[:12]
+
+
 class HermesUiData:
     """Read/write facade over existing Hermes registries; owns no state."""
 
     @staticmethod
-    def tasks(session_key: str) -> list[dict[str, Any]]:
+    def tasks(session_key: str) -> list[dict[str, Any]] | None:
         tasks: list[dict[str, Any]] = []
+        loaded = 0
         try:
             from tools.async_delegation import list_async_delegations
 
-            for item in list_async_delegations():
+            delegations = list_async_delegations()
+            loaded += 1
+            for item in delegations:
                 if (
                     str(item.get("session_key") or "") != session_key
                     or item.get("status") not in LIVE_TASK_STATES
@@ -81,7 +89,9 @@ class HermesUiData:
         try:
             from tools.process_registry import process_registry
 
-            for item in process_registry.list_sessions(session_key=session_key):
+            processes = process_registry.list_sessions(session_key=session_key)
+            loaded += 1
+            for item in processes:
                 if item.get("status") != "running":
                     continue
                 label = " ".join(str(item.get("command") or "Фоновый процесс").split())
@@ -94,7 +104,7 @@ class HermesUiData:
                 })
         except Exception:
             pass
-        return tasks
+        return tasks if loaded else None
 
     @staticmethod
     def pending_count(session_key: str) -> int:
@@ -114,13 +124,13 @@ class HermesUiData:
         return count
 
     @staticmethod
-    def schedules(source: Any) -> list[dict[str, Any]]:
+    def schedules(source: Any) -> list[dict[str, Any]] | None:
         try:
             from cron.jobs import list_jobs
 
             jobs = list_jobs(include_disabled=True)
         except Exception:
-            return []
+            return None
         expected_thread = str(getattr(source, "thread_id", None) or "")
         if expected_thread == "1":
             expected_thread = ""
@@ -149,9 +159,8 @@ class HermesUiData:
         return result
 
     @staticmethod
-    def memory_entries() -> list[dict[str, str]]:
+    def memory_entries() -> list[dict[str, str]] | None:
         try:
-            from hashlib import sha256
             from tools.memory_tool import load_on_disk_store
 
             store = load_on_disk_store()
@@ -168,7 +177,7 @@ class HermesUiData:
                 for target, content in pairs
             ]
         except Exception:
-            return []
+            return None
 
     @staticmethod
     def stop_task(session_key: str, kind: str, task_id: str) -> bool:
@@ -191,7 +200,7 @@ class HermesUiData:
 
     def stop_all(self, session_key: str) -> int:
         count = 0
-        for task in self.tasks(session_key):
+        for task in self.tasks(session_key) or []:
             if self.stop_task(session_key, str(task.get("kind") or ""), str(task.get("id") or "")):
                 count += 1
         return count
@@ -201,7 +210,10 @@ class HermesUiData:
         try:
             from cron.jobs import get_job, pause_job, remove_job, resume_job, trigger_job
 
-            visible = {item["id"] for item in HermesUiData.schedules(source)}
+            schedules = HermesUiData.schedules(source)
+            if schedules is None:
+                return False
+            visible = {item["id"] for item in schedules}
             if job_id not in visible:
                 return False
             if action == "pause":
@@ -227,7 +239,7 @@ class HermesUiData:
 
             item = next(
                 (
-                    entry for entry in HermesUiData.memory_entries()
+                    entry for entry in HermesUiData.memory_entries() or []
                     if entry["target"] == target and entry["digest"] == digest
                 ),
                 None,
@@ -235,7 +247,7 @@ class HermesUiData:
             if item is None:
                 return False
             result = load_on_disk_store().remove(target, item["content"])
-            remaining = HermesUiData.memory_entries()
+            remaining = HermesUiData.memory_entries() or []
             return bool(
                 result.get("success")
                 and not any(entry["target"] == target and entry["digest"] == digest for entry in remaining)
@@ -274,22 +286,43 @@ class CharlineUi:
             None,
         )
 
+    def _tasks(self, session_key: str) -> list[dict[str, Any]] | None:
+        tasks = self.data.tasks(session_key)
+        if tasks is None:
+            return None
+        return [item for item in tasks if item.get("state") != "foreground"]
+
+    def _schedule(self, source: Any, reference: str) -> dict[str, Any] | None:
+        schedules = self.data.schedules(source)
+        if schedules is None:
+            return None
+        return next((
+            item for item in schedules
+            if str(item.get("id") or "") == reference
+            or _entity_ref("schedule", str(item.get("id") or "")) == reference
+        ), None)
+
     def home(self, source: Any) -> dict[str, Any]:
         context = self.context(source)
         project = self._project(source)
-        tasks = [item for item in self.data.tasks(context.session_key) if item.get("state") != "foreground"]
+        loaded_tasks = self._tasks(context.session_key)
+        tasks = loaded_tasks or []
         pending = self.data.pending_count(context.session_key)
         if project:
+            schedules = self.data.schedules(source)
             lines = ["Charline · Проект", "", project.name]
             if tasks:
                 lines.extend(["", _count_phrase(len(tasks), "задача выполняется", "задачи выполняются", "задач выполняются")])
             if pending:
                 lines.append(_count_phrase(pending, "решение ожидает вас", "решения ожидают вас", "решений ожидают вас"))
+            if schedules:
+                lines.append(_count_phrase(len(schedules), "расписание", "расписания", "расписаний"))
+            if loaded_tasks is None or schedules is None:
+                lines.append("Часть состояния временно недоступна.")
             return {
                 "text": "\n".join(lines),
                 "buttons": _rows(
-                    [_button("Сводка", f"summary.{project.thread_id}"), _button("Задачи", "tasks")],
-                    [_button("Расписания", "schedules"), _button("Управление", f"manage.{project.thread_id}")],
+                    [_button("Задачи", "tasks"), _button("Расписания", "schedules")],
                 ),
             }
         lines = ["Charline"]
@@ -297,6 +330,10 @@ class CharlineUi:
             lines.extend(["", _count_phrase(len(tasks), "активная задача", "активные задачи", "активных задач")])
         if pending:
             lines.append(_count_phrase(pending, "решение ожидает вас", "решения ожидают вас", "решений ожидают вас"))
+        if loaded_tasks is None:
+            lines.append("Не удалось загрузить задачи.")
+        if not tasks and not pending:
+            lines.extend(["", "Напишите, что нужно — можно обычным сообщением или голосом."])
         return {
             "text": "\n".join(lines),
             "buttons": _rows(
@@ -308,7 +345,8 @@ class CharlineUi:
 
     def today(self, source: Any) -> dict[str, Any]:
         context = self.context(source)
-        tasks = [item for item in self.data.tasks(context.session_key) if item.get("state") != "foreground"]
+        loaded_tasks = self._tasks(context.session_key)
+        tasks = loaded_tasks or []
         pending = self.data.pending_count(context.session_key)
         schedules = self.data.schedules(source)
         lines = ["Сегодня", ""]
@@ -317,14 +355,18 @@ class CharlineUi:
         if pending:
             lines.append(_count_phrase(pending, "задача ждёт вашего решения", "задачи ждут вашего решения", "задач ждут вашего решения"))
         if schedules:
-            lines.append(f"Следующее расписание: {schedules[0].get('next_run_at') or '—'}")
-        if not tasks and not pending and not schedules:
-            lines.append("На сегодня ничего срочного.")
+            lines.append(_count_phrase(len(schedules), "активное расписание", "активных расписания", "активных расписаний"))
+        if loaded_tasks is None:
+            lines.append("Не удалось загрузить задачи.")
+        if schedules is None:
+            lines.append("Не удалось загрузить расписания.")
+        if loaded_tasks is not None and schedules is not None and not tasks and not pending and not schedules:
+            lines.append("Активных задач и расписаний в этом чате нет.")
         buttons = []
         if tasks or pending:
-            buttons.append(_button(f"Задачи · {len(tasks) + pending}", "tasks"))
+            buttons.append(_button(f"Задачи и решения · {len(tasks) + pending}", "today.tasks"))
         if schedules:
-            buttons.append(_button("Расписания", "schedules"))
+            buttons.append(_button("Расписания", "today.schedules"))
         return {"text": "\n".join(lines), "buttons": _rows(buttons, [_button("Назад", "home")])}
 
     def projects(self, source: Any, page: int = 1) -> dict[str, Any]:
@@ -342,17 +384,20 @@ class CharlineUi:
             lines = ["Проекты"]
             for item in projects:
                 project_source = _source_with_thread(source, item.thread_id)
-                count = len([
-                    task for task in self.data.tasks(self._session_key_builder(project_source))
-                    if task.get("state") != "foreground"
-                ])
-                status = _count_phrase(count, "активная задача", "активные задачи", "активных задач") if count else "нет активных задач"
+                tasks = self._tasks(self._session_key_builder(project_source))
+                count = len(tasks or [])
+                if tasks is None:
+                    status = "задачи недоступны"
+                elif count:
+                    status = _count_phrase(count, "активная задача", "активные задачи", "активных задач")
+                else:
+                    status = "нет активных задач"
                 lines.extend(["", item.name, status])
             if page_count > 1:
                 lines.extend(["", f"Страница {page}/{page_count}"])
             text = "\n".join(lines)
         rows = [
-            [_button(item.name, f"project.{item.thread_id}")]
+            [_button(f"Сводка · {item.name}"[:40], f"project.{item.thread_id}")]
             for item in projects
         ]
         navigation = []
@@ -362,7 +407,7 @@ class CharlineUi:
             navigation.append(_button("→", f"projects.{page + 1}"))
         if navigation:
             rows.append(navigation)
-        rows.extend([[_button("＋ Новый проект", "new_project")], [_button("Назад", "home")]])
+        rows.extend([[_button("Как создать проект", "new_project")], [_button("Назад", "home")]])
         return {"text": text, "buttons": rows}
 
     def project_summary(self, source: Any, thread_id: str) -> dict[str, Any]:
@@ -371,12 +416,20 @@ class CharlineUi:
             return {"text": "Этот проект больше не существует.", "buttons": [[_button("К проектам", "projects")]]}
         project_source = _source_with_thread(source, project.thread_id)
         session_key = self._session_key_builder(project_source)
-        tasks = [item for item in self.data.tasks(session_key) if item.get("state") != "foreground"]
+        loaded_tasks = self._tasks(session_key)
+        tasks = loaded_tasks or []
         schedules = self.data.schedules(project_source)
-        lines = [project.name, "", f"Активных задач: {len(tasks)}"]
+        lines = [
+            project.name, "",
+            f"Активных задач: {len(tasks)}" if loaded_tasks is not None else "Задачи временно недоступны.",
+        ]
         if schedules:
             lines.append(f"Расписаний: {len(schedules)}")
+        elif schedules is None:
+            lines.append("Расписания временно недоступны.")
         inside_project = str(getattr(source, "thread_id", None) or "") == project.thread_id
+        if not inside_project:
+            lines.extend(["", "Для работы откройте тему проекта в Telegram."])
         project_actions = [_button("Задачи", "tasks" if inside_project else f"project_tasks.{project.thread_id}")]
         if inside_project and schedules:
             project_actions.append(_button("Расписания", "schedules"))
@@ -410,7 +463,15 @@ class CharlineUi:
         back_action: str = "home",
     ) -> dict[str, Any]:
         context = self.context(source)
-        tasks = [item for item in self.data.tasks(context.session_key) if item.get("state") != "foreground"]
+        tasks = self._tasks(context.session_key)
+        if tasks is None:
+            return {
+                "text": "Задачи\n\nНе удалось загрузить задачи. Попробуйте обновить.",
+                "buttons": _rows(
+                    [_button("Обновить", refresh_action)],
+                    [_button("Назад", back_action)],
+                ),
+            }
         waiting = self.data.pending_count(context.session_key)
         tasks.extend(
             {"id": f"waiting-{index}", "label": "Требуется ваше решение", "state": "waiting"}
@@ -420,21 +481,39 @@ class CharlineUi:
             text = "Задачи\n\nАктивных задач сейчас нет."
         else:
             lines = ["Задачи"]
+            states = {
+                "stalling": "задерживается",
+                "finalizing": "завершается",
+                "waiting": "ожидает продолжения",
+            }
             for item in tasks:
-                state = "ожидает вас" if item.get("state") == "waiting" else "выполняется"
+                state = states.get(str(item.get("state") or ""), "выполняется")
+                if str(item.get("id") or "").startswith("waiting-"):
+                    state = "ожидает вашего ответа"
                 lines.extend(["", str(item.get("label") or "Задача"), f"● {state}"])
+            if waiting:
+                lines.extend(["", "Вернитесь к сообщению с вопросом выше, чтобы ответить."])
             text = "\n".join(lines)
         rows = []
         for item in tasks:
             if controls and item.get("kind") in {"delegation", "process"} and item.get("id"):
-                rows.append([_button(f"Остановить · {str(item.get('label') or 'задача')[:24]}", f"task_stop.{item['kind']}.{item['id']}")])
+                ref = _entity_ref(str(item["kind"]), str(item["id"]))
+                rows.append([_button(f"Остановить · {str(item.get('label') or 'задача')[:24]}", f"task_stop.{ref}")])
         if controls and len(rows) > 1:
             rows.append([_button("Остановить всё", "tasks.stop_all")])
         rows.extend([[_button("Обновить", refresh_action)], [_button("Назад", back_action)]])
         return {"text": text, "buttons": rows}
 
-    def schedules(self, source: Any) -> dict[str, Any]:
+    def schedules(self, source: Any, *, back_action: str = "home") -> dict[str, Any]:
         jobs = self.data.schedules(source)
+        if jobs is None:
+            return {
+                "text": "Расписания\n\nНе удалось загрузить расписания. Попробуйте обновить.",
+                "buttons": _rows(
+                    [_button("Обновить", "schedules")],
+                    [_button("Назад", back_action)],
+                ),
+            }
         if not jobs:
             text = (
                 "Расписания\n\nРасписаний пока нет.\n\n"
@@ -446,25 +525,41 @@ class CharlineUi:
                 status = "активно" if job.get("enabled") else "на паузе"
                 lines.extend(["", str(job.get("name") or "Расписание"), str(job.get("display") or ""), f"● {status}"])
             text = "\n".join(lines)
-        rows = [[_button(str(job.get("name") or "Подробнее")[:30], f"schedule.{job['id']}")] for job in jobs if job.get("id")]
-        rows.extend([[_button("＋ Создать", "schedule_new")], [_button("Назад", "home")]])
+        rows = [
+            [_button(str(job.get("name") or "Подробнее")[:30], f"schedule.{_entity_ref('schedule', str(job['id']))}")]
+            for job in jobs if job.get("id")
+        ]
+        rows.extend([[_button("Как создать расписание", "schedule_new")], [_button("Назад", back_action)]])
         return {"text": text, "buttons": rows}
 
     def schedule_detail(self, source: Any, job_id: str) -> dict[str, Any]:
-        job = next((item for item in self.data.schedules(source) if item.get("id") == job_id), None)
+        if self.data.schedules(source) is None:
+            return {
+                "text": "Расписания\n\nНе удалось загрузить расписания. Попробуйте обновить.",
+                "buttons": [[_button("К расписаниям", "schedules")]],
+            }
+        job = self._schedule(source, job_id)
         if job is None:
             return {"text": "Это расписание больше не существует.", "buttons": [[_button("К расписаниям", "schedules")]]}
+        last_status = {
+            "ok": "успешно",
+            "success": "успешно",
+            "error": "ошибка",
+            "running": "выполняется",
+        }.get(str(job.get("last_status") or "").lower(), str(job.get("last_status") or "—"))
         lines = [
             str(job.get("name") or "Расписание"), "",
+            f"Когда: {job.get('display') or 'не указано'}",
             f"Следующий запуск: {job.get('next_run_at') or '—'}",
-            f"Последний запуск: {job.get('last_run_at') or 'ещё не запускалось'} · {job.get('last_status') or '—'}",
+            f"Последний запуск: {job.get('last_run_at') or 'ещё не запускалось'} · {last_status}",
         ]
-        toggle = _button("Пауза", f"schedule_pause.{job_id}") if job.get("enabled") else _button("Возобновить", f"schedule_resume.{job_id}")
+        ref = _entity_ref("schedule", job_id)
+        toggle = _button("Пауза", f"schedule_pause.{ref}") if job.get("enabled") else _button("Возобновить", f"schedule_resume.{ref}")
         return {
             "text": "\n".join(lines),
             "buttons": _rows(
-                [_button("Запустить сейчас", f"schedule_run.{job_id}"), toggle],
-                [_button("Удалить", f"schedule_delete.{job_id}")],
+                [_button("Запустить сейчас", f"schedule_run.{ref}"), toggle],
+                [_button("Удалить", f"schedule_delete.{ref}")],
                 [_button("Назад", "schedules")],
             ),
         }
@@ -475,7 +570,7 @@ class CharlineUi:
             "text": "Настройки",
             "buttons": _rows(
                 [_button("Память", "memory")],
-                [_button("Расширенное", "advanced")],
+                [_button("Системные команды", "advanced")],
                 [_button("Назад", "home")],
             ),
         }
@@ -483,6 +578,11 @@ class CharlineUi:
     def memory(self, source: Any) -> dict[str, Any]:
         del source
         entries = self.data.memory_entries()
+        if entries is None:
+            return {
+                "text": "Память\n\nНе удалось загрузить память. Попробуйте обновить.",
+                "buttons": [[_button("Обновить", "memory")], [_button("Назад", "settings")]],
+            }
         lines = ["Память"]
         if not entries:
             lines.extend(["", "Долговременная память пока пуста."])
@@ -522,6 +622,10 @@ class CharlineUi:
             return self.home(source)
         if action == "today":
             return self.today(source)
+        if action == "today.tasks":
+            return self.tasks(source, refresh_action="today.tasks", back_action="today")
+        if action == "today.schedules":
+            return self.schedules(source, back_action="today")
         if action == "projects":
             return self.projects(source)
         if action.startswith("projects."):
@@ -567,16 +671,50 @@ class CharlineUi:
                 back_action=f"summary.{thread_id}",
             )
         if action.startswith("schedule."):
-            return self.schedule_detail(source, action.split(".", 1)[1])
+            reference = action.split(".", 1)[1]
+            job = self._schedule(source, reference)
+            return self.schedule_detail(source, str(job.get("id"))) if job else self.schedule_detail(source, reference)
         if action.startswith("task_stop."):
-            _, kind, task_id = action.split(".", 2)
-            done = self.data.stop_task(context.session_key, kind, task_id)
+            parts = action.split(".", 2)
+            if len(parts) == 3:
+                _, kind, task_id = parts
+                task = next((
+                    item for item in self.data.tasks(context.session_key) or []
+                    if item.get("kind") == kind and str(item.get("id") or "") == task_id
+                ), None)
+            else:
+                reference = parts[1]
+                task = next((
+                    item for item in self.data.tasks(context.session_key) or []
+                    if item.get("kind") in {"delegation", "process"}
+                    and _entity_ref(str(item["kind"]), str(item.get("id") or "")) == reference
+                ), None)
+            if task is None:
+                card = self.tasks(source)
+                card["text"] += "\n\nЗадача уже завершена или больше не доступна."
+                return card
+            token = self._new_confirmation(
+                "task", context.session_key, str(task["kind"]), str(task["id"]),
+                str(source.chat_id), str(source.thread_id or ""), str(source.user_id or ""),
+            )
+            return {
+                "text": f"Остановить задачу «{str(task.get('label') or 'Задача')}»?",
+                "buttons": [
+                    [_button("Остановить", f"task_confirm.{token}")],
+                    [_button("Отмена", "tasks")],
+                ],
+            }
+        if action.startswith("task_confirm."):
+            payload = self._consume_confirmation(action.rsplit(".", 1)[1], context)
+            if payload is None or payload[0] != "task":
+                return {"text": "Эта кнопка больше не актуальна.", "buttons": [[_button("К задачам", "tasks")]]}
+            done = self.data.stop_task(str(payload[1]), str(payload[2]), str(payload[3]))
             card = self.tasks(source)
-            card["text"] += "\n\nОстановка запрошена." if done else "\n\nНе удалось остановить задачу."
+            card["text"] += "\n\nОстановка запрошена." if done else "\n\nЗадача уже завершена или не найдена."
             return card
         if action == "tasks.stop_all":
             count = len([
-                item for item in self.data.tasks(context.session_key)
+                item for item in self.data.tasks(context.session_key) or []
                 if item.get("kind") in {"delegation", "process"}
             ])
             if not count:
@@ -597,45 +735,68 @@ class CharlineUi:
             card = self.tasks(source)
             card["text"] += f"\n\nОстановлено задач: {count}."
             return card
-        for verb in ("pause", "resume", "run"):
+        schedule_actions = {
+            "pause": ("Приостановить", "Расписание приостановлено."),
+            "resume": ("Возобновить", "Расписание возобновлено."),
+            "run": ("Запустить сейчас", "Запуск поставлен в очередь."),
+            "delete": ("Удалить", "Расписание удалено."),
+        }
+        for verb, (button_label, _) in schedule_actions.items():
             prefix = f"schedule_{verb}."
             if action.startswith(prefix):
-                job_id = action[len(prefix):]
-                done = self.data.mutate_schedule(source, job_id, verb)
-                card = self.schedule_detail(source, job_id)
-                if not done:
-                    card["text"] += "\n\nНе удалось выполнить действие."
-                return card
-        if action.startswith("schedule_delete."):
-            job_id = action.split(".", 1)[1]
-            if not any(item.get("id") == job_id for item in self.data.schedules(source)):
-                return self.schedule_detail(source, job_id)
-            token = self._new_confirmation(
-                "schedule", job_id, str(source.chat_id),
-                str(source.thread_id or ""), str(source.user_id or ""),
-            )
-            return {
-                "text": "Удалить это расписание? История сессий не удаляется.",
-                "buttons": [[_button("Удалить", f"schedule_confirm.{token}")], [_button("Отмена", f"schedule.{job_id}")]],
-            }
+                reference = action[len(prefix):]
+                job = self._schedule(source, reference)
+                if job is None:
+                    return self.schedule_detail(source, reference)
+                job_id = str(job["id"])
+                token = self._new_confirmation(
+                    "schedule", verb, job_id, str(source.chat_id),
+                    str(source.thread_id or ""), str(source.user_id or ""),
+                )
+                name = str(job.get("name") or "это расписание")
+                question = (
+                    f"Запустить расписание «{name}» сейчас?"
+                    if verb == "run"
+                    else f"{button_label} расписание «{name}»?"
+                )
+                return {
+                    "text": question,
+                    "buttons": [
+                        [_button(button_label, f"schedule_confirm.{token}")],
+                        [_button("Отмена", f"schedule.{_entity_ref('schedule', job_id)}")],
+                    ],
+                }
         if action.startswith("schedule_confirm."):
             payload = self._consume_confirmation(action.rsplit(".", 1)[1], context)
             if payload is None or payload[0] != "schedule":
                 return {"text": "Эта кнопка больше не актуальна.", "buttons": [[_button("К расписаниям", "schedules")]]}
-            done = self.data.mutate_schedule(source, str(payload[1]), "delete")
-            card = self.schedules(source)
-            card["text"] += "\n\nРасписание удалено." if done else "\n\nНе удалось подтвердить удаление."
+            verb, job_id = str(payload[1]), str(payload[2])
+            if verb not in schedule_actions:
+                return {"text": "Эта кнопка больше не актуальна.", "buttons": [[_button("К расписаниям", "schedules")]]}
+            done = self.data.mutate_schedule(source, job_id, verb)
+            card = self.schedules(source) if verb == "delete" else self.schedule_detail(source, job_id)
+            if done:
+                card["text"] += f"\n\n{schedule_actions[verb][1]}"
+            else:
+                card["text"] += "\n\nНе удалось подтвердить действие."
             return card
         if action.startswith("memory_delete."):
             _, target, digest = action.split(".", 2)
-            if not any(item["target"] == target and item["digest"] == digest for item in self.data.memory_entries()):
+            entries = self.data.memory_entries()
+            if entries is None:
+                return self.memory(source)
+            entry = next((
+                item for item in entries
+                if item["target"] == target and item["digest"] == digest
+            ), None)
+            if entry is None:
                 return {"text": "Эта запись памяти больше не существует.", "buttons": [[_button("К памяти", "memory")]]}
             token = self._new_confirmation(
                 "memory", target, digest, str(source.chat_id),
                 str(source.thread_id or ""), str(source.user_id or ""),
             )
             return {
-                "text": "Удалить эту запись из долговременной памяти?",
+                "text": f"Удалить из долговременной памяти?\n\n{entry['content']}",
                 "buttons": [[_button("Удалить", f"memory_confirm.{token}")], [_button("Отмена", "memory")]],
             }
         if action.startswith("memory_confirm."):

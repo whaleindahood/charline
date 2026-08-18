@@ -61,6 +61,8 @@ class CharlinePlugin:
         platform = getattr(getattr(source, "platform", None), "value", "")
         if platform != "telegram" or not getattr(source, "chat_id", None):
             raise RuntimeError("Проекты Charline V1 доступны в Telegram.")
+        if str(getattr(source, "chat_type", "") or "").lower() not in {"dm", "private"}:
+            raise RuntimeError("Интерфейс Charline доступен только в личном чате с ботом.")
         return source
 
     async def projects_command(self, raw_args: str) -> str:
@@ -205,6 +207,10 @@ class CharlinePlugin:
 
     def ui_callback(self, action: str, context: Mapping[str, Any]) -> dict[str, Any]:
         source = self._callback_source(context)
+        try:
+            self._telegram_source(RequestContext(source=source))
+        except RuntimeError as exc:
+            return {"text": str(exc), "buttons": []}
         return self.ui.handle(str(action or ""), self.ui.context(source))
 
     def platform_event(
