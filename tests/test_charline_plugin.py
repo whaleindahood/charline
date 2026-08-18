@@ -53,6 +53,19 @@ class FakeUiData:
             return None
         return list(self.memories)
 
+    def personal_tasks(self):
+        if not self.memory_available:
+            return None
+        return [
+            {
+                "title": item["content"][len("Задача: "):],
+                "target": item["target"],
+                "digest": item["digest"],
+            }
+            for item in self.memories
+            if item.get("content", "").startswith("Задача: ")
+        ]
+
     def pending_count(self, session_key):
         return int(self.pending_by_session.get(session_key, 0))
 
@@ -118,25 +131,31 @@ def test_project_index_is_a_read_only_view_of_native_dm_topics() -> None:
     ]
 
 
-def test_project_create_uses_native_platform_action() -> None:
+def test_project_start_uses_native_topic_task_action() -> None:
     config = {"platforms": {"telegram": {"extra": {"dm_topics": []}}}}
 
-    async def ensure(_platform, chat_id, name):
+    async def start(_platform, chat_id, name, task, owner_user_id, request_id):
         config["platforms"]["telegram"]["extra"]["dm_topics"] = [
             {"chat_id": chat_id, "topics": [{"name": name, "thread_id": 77}]}
         ]
-        return {"ok": True, "thread_id": "77"}
+        return {
+            "ok": True, "thread_id": "77", "request_id": request_id,
+            "task": task, "owner_user_id": owner_user_id,
+        }
 
-    actions = SimpleNamespace(
-        ensure_private_topic=AsyncMock(side_effect=ensure)
-    )
+    actions = SimpleNamespace(start_private_topic_task=AsyncMock(side_effect=start))
     service = ProjectService(actions, config_loader=lambda: config)
-    preview = service.prepare("123", "42", " Project  Alpha ")
-    result = asyncio.run(service.confirm("123", "42", preview.digest))
+    result = asyncio.run(service.start(
+        "123", "42", " Project  Alpha ", "Build and test the website"
+    ))
+
     assert result.thread_id == "77"
-    actions.ensure_private_topic.assert_awaited_once_with(
-        "telegram", "123", "Project Alpha"
+    call = actions.start_private_topic_task.await_args
+    assert call.args[:4] == (
+        "telegram", "123", "Project Alpha", "Build and test the website"
     )
+    assert call.kwargs["owner_user_id"] == "42"
+    assert call.kwargs["request_id"].startswith("charline-")
 
 
 def test_plugin_registers_commands_tool_and_hook() -> None:
@@ -148,9 +167,32 @@ def test_plugin_registers_commands_tool_and_hook() -> None:
     }
     ctx.register_tool.assert_called_once()
     assert ctx.register_tool.call_args.kwargs["name"] == "charline_projects"
+    assert ctx.register_tool.call_args.kwargs["is_async"] is True
     assert [call.args[0] for call in ctx.register_hook.call_args_list] == [
         "pre_gateway_dispatch", "gateway_platform_event"
     ]
+
+
+def test_today_command_starts_a_normal_hermes_turn_in_main() -> None:
+    actions = SimpleNamespace(
+        dispatch_agent_turn=AsyncMock(return_value={"ok": True}),
+        ensure_private_topic=AsyncMock(),
+    )
+    plugin = CharlinePlugin(
+        SimpleNamespace(platform_actions=actions),
+        config_loader=lambda: {},
+    )
+    plugin.capture_request(
+        SimpleNamespace(source=_source(), text="/today"), MagicMock()
+    )
+
+    assert asyncio.run(plugin.today_command("")) is None
+    kwargs = actions.dispatch_agent_turn.await_args.kwargs
+    assert kwargs["chat_id"] == "123"
+    assert kwargs["owner_user_id"] == "42"
+    assert kwargs["thread_id"] == ""
+    assert "календар" in kwargs["prompt"].lower()
+    assert "личные задачи" in kwargs["prompt"].lower()
 
 
 def test_root_and_project_context_are_never_rewritten_by_hook() -> None:
@@ -175,8 +217,15 @@ def test_projects_new_command_and_tool_share_project_service() -> None:
         ]
         return {"ok": True, "thread_id": "88"}
 
+    async def start(_platform, chat_id, name, task, owner_user_id, request_id):
+        config["platforms"]["telegram"]["extra"]["dm_topics"] = [
+            {"chat_id": chat_id, "topics": [{"name": name, "thread_id": 99}]}
+        ]
+        return {"ok": True, "thread_id": "99", "request_id": request_id}
+
     actions = SimpleNamespace(
-        ensure_private_topic=AsyncMock(side_effect=ensure)
+        ensure_private_topic=AsyncMock(side_effect=ensure),
+        start_private_topic_task=AsyncMock(side_effect=start),
     )
     plugin = CharlinePlugin(
         SimpleNamespace(platform_actions=actions), config_loader=lambda: config
@@ -187,31 +236,28 @@ def test_projects_new_command_and_tool_share_project_service() -> None:
         session_store=MagicMock(),
     )
     command_result = asyncio.run(plugin.projects_command("new Alpha"))
-    assert "Создать Telegram-проект «Alpha»" in command_result
-    assert actions.ensure_private_topic.await_count == 0
-    digest = command_result.rsplit(" ", 1)[-1]
-    confirmed = asyncio.run(plugin.projects_command(f"confirm {digest}"))
-    assert "88" in confirmed
-
-    tool_result = json.loads(plugin.projects_tool({"action": "prepare_create", "name": "Beta"}))
-    assert tool_result["confirmation_required"] is True
-    assert tool_result["confirmation_command"].startswith("/projects confirm ")
+    assert "88" in command_result
     assert actions.ensure_private_topic.await_count == 1
+
+    tool_result = json.loads(asyncio.run(plugin.projects_tool({
+        "action": "start", "name": "Beta", "task": "Create a RAG system"
+    })))
+    assert tool_result["ok"] is True
+    assert tool_result["thread_id"] == "99"
+    assert tool_result["started"] is True
+    actions.start_private_topic_task.assert_awaited_once()
 
 
 def test_confirmation_is_once_only_and_unknown_outcome_is_not_retried() -> None:
     actions = SimpleNamespace(
-        ensure_private_topic=AsyncMock(
+        start_private_topic_task=AsyncMock(
             return_value={"ok": False, "error": "outcome_unknown"}
         )
     )
     service = ProjectService(actions, config_loader=lambda: {})
-    preview = service.prepare("123", "42", "Risky")
     with pytest.raises(RuntimeError, match="не повторяйте"):
-        asyncio.run(service.confirm("123", "42", preview.digest))
-    with pytest.raises(RuntimeError, match="устарело"):
-        asyncio.run(service.confirm("123", "42", preview.digest))
-    assert actions.ensure_private_topic.await_count == 1
+        asyncio.run(service.start("123", "42", "Risky", "Do risky work"))
+    assert actions.start_private_topic_task.await_count == 1
 
 
 def test_charline_menu_uses_origin_thread_and_owner() -> None:
@@ -253,8 +299,9 @@ def test_main_home_is_compact_and_conversation_first() -> None:
     card = ui.home(_source())
     labels = [button["label"] for row in card["buttons"] for button in row]
 
-    assert labels == ["Сегодня", "Проекты", "Задачи", "Расписания", "Настройки"]
-    assert "1 активная задача" in card["text"]
+    assert labels == ["Проекты", "Задачи", "Расписания", "Настройки"]
+    assert "1 работа выполняется" in card["text"]
+    assert "Что у меня сегодня?" in card["text"]
     for obsolete in (
         "Новая задача", "Новый проект", "Календарь", "Почта", "Файлы",
         "Исследование", "Память", "Сервисы", "Все функции Hermes",
@@ -289,22 +336,48 @@ def test_project_home_is_scoped_to_exact_native_topic() -> None:
     assert "Charline · Проект" in card["text"]
     assert "Apartment" in card["text"]
     assert "1 расписание" in card["text"]
-    assert labels == ["Задачи", "Расписания"]
+    assert labels == ["В работе · 2", "Расписания · 1"]
     assert "Проекты" not in labels
 
 
-def test_today_has_conversational_empty_state_and_dynamic_actions() -> None:
+def test_personal_tasks_are_not_agent_processes() -> None:
     data = FakeUiData()
+    data.memories = [
+        {"target": "memory", "content": "Задача: Сделать лабораторную", "digest": "task1"},
+        {"target": "user", "content": "Часовой пояс — Москва", "digest": "profile1"},
+    ]
+    data.tasks_by_session["main"] = [
+        {"id": "worker", "kind": "delegation", "label": "Фоновый агент", "state": "running"}
+    ]
     ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
 
-    empty = ui.today(_source())
-    assert "Активных задач и расписаний в этом чате нет" in empty["text"]
-    assert "ничего срочного" not in empty["text"]
-    assert all("Почта" not in button["label"] for row in empty["buttons"] for button in row)
+    card = ui.personal_tasks(_source())
 
-    data.tasks_by_session["main"] = [{"id": "d1", "label": "Анализ", "state": "running"}]
-    active = ui.today(_source())
-    assert any(button["action"] == "today.tasks" for row in active["buttons"] for button in row)
+    assert card["text"].startswith("Задачи")
+    assert "Сделать лабораторную" in card["text"]
+    assert "Фоновый агент" not in card["text"]
+    assert "Часовой пояс" not in card["text"]
+    assert any(
+        button["label"] == "Выполнено · Сделать лабораторную"
+        for row in card["buttons"] for button in row
+    )
+
+
+def test_personal_task_completion_requires_confirmation() -> None:
+    data = FakeUiData()
+    data.memories = [
+        {"target": "memory", "content": "Задача: Купить лампу", "digest": "task1"}
+    ]
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+    context = ui.context(_source())
+
+    preview = ui.handle("personal_task_done.memory.task1", context)
+    assert data.calls == []
+    assert "Купить лампу" in preview["text"]
+    result = ui.handle(preview["buttons"][0][0]["action"], context)
+
+    assert ("memory", "memory", "task1") in data.calls
+    assert "Задач пока нет" in result["text"]
 
 
 def test_projects_view_owns_new_project_and_summary_is_read_only() -> None:
@@ -317,15 +390,16 @@ def test_projects_view_owns_new_project_and_summary_is_read_only() -> None:
 
     project_list = ui.projects(_source())
     labels = [button["label"] for row in project_list["buttons"] for button in row]
-    assert "Сводка · Alpha" in labels
-    assert "Как создать проект" in labels
-    assert "Как создать проект" not in [
-        button["label"] for row in ui.home(_source())["buttons"] for button in row
-    ]
+    assert "Статус · Alpha" in labels
+    assert "Как создать проект" not in labels
 
     summary = ui.project_summary(_source(thread_id="77"), "77")
     assert "Alpha" in summary["text"]
     assert data.tasks_by_session == {}
+    assert all(
+        button["label"] != "В работе"
+        for row in summary["buttons"] for button in row
+    )
 
 
 def test_cross_project_views_remain_read_only_and_keep_explicit_scope() -> None:
@@ -423,6 +497,7 @@ def test_task_states_are_human_readable_and_single_stop_is_confirmed() -> None:
     context = ui.context(_source())
 
     card = ui.tasks(_source())
+    assert card["text"].startswith("В работе")
     assert "завершается" in card["text"]
     assert "задерживается" in card["text"]
 
@@ -448,8 +523,10 @@ def test_schedules_list_details_and_settings_memory_are_reconstructable() -> Non
     ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
 
     schedules = ui.schedules(_source())
+    assert schedules["text"].startswith("Расписания")
     assert "Утренний план" in schedules["text"]
-    assert "Как создать расписание" in [
+    assert "Следующий запуск: завтра, 08:30" in schedules["text"]
+    assert "Как создать расписание" not in [
         button["label"] for row in schedules["buttons"] for button in row
     ]
     detail = ui.handle("schedule.job123", ui.context(_source()))
@@ -459,11 +536,29 @@ def test_schedules_list_details_and_settings_memory_are_reconstructable() -> Non
 
     settings = ui.settings(_source())
     labels = [button["label"] for row in settings["buttons"] for button in row]
-    assert labels == ["Память", "Системные команды", "Назад"]
+    assert labels == ["Память", "Расписания", "Назад"]
+    assert "Внешние действия всегда требуют подтверждения" in settings["text"]
+    automations_action = settings["buttons"][1][0]["action"]
+    automations = ui.handle(automations_action, ui.context(_source()))
+    assert automations["buttons"][-1][0] == {"label": "Назад", "action": "settings"}
     memory = ui.handle("memory", ui.context(_source()))
     assert "Часовой пояс" in memory["text"]
     assert "Запомнить" not in memory["text"]
     assert "Забыть" not in memory["text"]
+
+
+def test_unnamed_automation_button_names_the_object_not_a_vague_action() -> None:
+    data = FakeUiData()
+    data.schedules_by_thread[""] = [{
+        "id": "job123", "name": "", "display": "будни · 08:30",
+        "enabled": True, "next_run_at": "завтра, 08:30",
+    }]
+    ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
+
+    labels = [button["label"] for row in ui.schedules(_source())["buttons"] for button in row]
+
+    assert labels[0] == "Расписание"
+    assert "Подробнее" not in labels
 
 
 def test_read_navigation_is_stateless_but_mutation_confirmation_expires() -> None:
@@ -561,30 +656,30 @@ def test_read_failures_are_not_reported_as_empty_state() -> None:
     data.memory_available = False
     ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
 
-    assert "Не удалось загрузить задачи" in ui.tasks(_source())["text"]
+    assert "Не удалось загрузить текущую работу" in ui.tasks(_source())["text"]
     assert "Не удалось загрузить расписания" in ui.schedules(_source())["text"]
     assert "Не удалось загрузить память" in ui.memory(_source())["text"]
 
 
-def test_today_drill_down_returns_to_today() -> None:
+def test_agent_processes_do_not_replace_personal_tasks_in_main_navigation() -> None:
     data = FakeUiData()
     data.tasks_by_session["main"] = [
         {"id": "d1", "kind": "delegation", "label": "Работа", "state": "running"}
     ]
     ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), data, lambda _source: "main")
-    context = ui.context(_source())
+    active = ui.home(_source())
+    assert all(button["action"] != "tasks" for row in active["buttons"] for button in row)
+    assert any(button["action"] == "personal_tasks" for row in active["buttons"] for button in row)
 
-    today = ui.today(_source())
-    action = today["buttons"][0][0]["action"]
-    tasks = ui.handle(action, context)
-
-    assert tasks["buttons"][-1][0] == {"label": "Назад", "action": "today"}
+    data.tasks_by_session["main"] = []
+    idle = ui.home(_source())
+    assert all(button["action"] != "tasks" for row in idle["buttons"] for button in row)
 
 
 def test_daily_ui_has_no_generic_force_reply_launchers() -> None:
     ui = CharlineUi(ProjectService(MagicMock(), lambda: {}), FakeUiData(), lambda _source: "main")
     cards = [
-        ui.home(_source()), ui.today(_source()), ui.projects(_source()),
+        ui.home(_source()), ui.projects(_source()), ui.personal_tasks(_source()),
         ui.tasks(_source()), ui.schedules(_source()), ui.settings(_source()),
     ]
     assert all("force_reply" not in card for card in cards)

@@ -20,7 +20,7 @@ Required results:
 - unknown write outcomes cannot be blindly retried;
 - usage output contains aggregate counters only, never message content.
 - architecture checks find no Charline session router, project database, scheduler or second Gateway;
-- the Charline plugin registers the five daily views, `/charline`, `/projects` and its model tool without overriding upstream `/topic`;
+- the Charline plugin registers the five owner-facing daily commands, `/charline`, `/projects` and its model tool without overriding upstream `/topic`;
 - the Hermes patch contains only generic, capability-gated extension points required by the plugin.
 
 ## Active-profile gate
@@ -62,20 +62,21 @@ The persistent Telegram command picker must show exactly `/today`, `/projects`, 
 
 Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 
-1. Confirm the picker has exactly five daily entries. Main `/charline` must show a compact status card and invite ordinary text/voice input; project `/charline` must show exact-topic status with only Tasks and Schedules actions. Neither Home card contains Calendar, Mail, Files, Research, Memory, New Task, New Project or all-Hermes launchers.
+1. Confirm the picker has exactly five owner-facing entries with Russian descriptions: Today, Projects, personal Tasks, Schedules and Settings. Main `/charline` must remain conversation-first and must not expose one launcher per tool/integration.
 2. Send a natural-language meeting request without duration; receive one short duration question, then no progress chatter and one complete preview; cancel without a write.
 3. Repeat the request by Russian voice; verify the transcript and cancel at the final confirmation.
 4. Request a busy slot; receive one conflict message with the nearest available start as an exact alternative preview.
 5. Change one field after preview; verify the old confirmation is invalid and a new preview is required.
 6. Separately confirm one sandbox Calendar creation; receive one concise result after exact read-back.
-7. In the ordinary direct-message chat, start two independent bounded tasks in parallel; continue the conversation, inspect only current-chat work through `/tasks` with no Gateway service jobs shown, and verify each completion is labelled and separately verified. Verify realistic Hermes entity IDs still render valid callback buttons and stopping one task requires an exact confirmation. `/agents` remains a manually reachable upstream diagnostic.
+7. Say «Запомни, мне нужно сделать лабораторную», open `/tasks`, and verify the personal task appears while active delegations/Gateway jobs do not. Mark it complete, verify exact confirmation, and verify the matching Memory entry was removed.
 8. In root DM Main, send ordinary text, create A with `/projects new A`, use A, return to Main, create/use B and return to Main. Verify three stable, isolated Hermes sessions and no last-project redirect.
-9. Verify `Новый проект` and the natural-language project tool use the same service and require an exact explicit creation step.
+9. Ask naturally for a substantial artifact such as a tested site. Verify Hermes decides that durable context is useful, creates/reuses one native topic, forwards the complete original request once, and begins work there without asking the owner to repeat it. Verify explicit `/projects new` can still create an empty topic.
 10. Restart the Gateway; verify native project metadata survives and stale/deleted topic state never redirects Main or another project.
-11. From Main and A, create separate background work and test reminders; verify every completion returns to its exact origin.
+11. From Main and A, create separate background work, native Kanban work and test reminders; verify every completion returns to its exact origin and never falls back to Main when an exact topic route is unavailable.
 12. Ask one unrelated general question in Main and verify Charline answers normally without forcing a menu or domain transaction.
-13. Render Projects, Tasks, Schedules and Settings, restart Gateway, then use their read-only buttons; each card must reconstruct and edit in place. Repeating an unchanged Refresh must finish without an error or stuck callback spinner. A pre-restart mutation confirmation must expire safely.
-14. Verify single-task stop, stop-all, every cron mutation (run, pause, resume and delete), and memory deletion require owner/chat/thread-bound exact confirmation and read-back. Verify Charline commands and callbacks cannot reveal private Memory in a group chat.
+13. Render Projects, personal Tasks, Schedules and Settings/Memory, restart Gateway, then use their read-only buttons; each card must reconstruct and edit in place. A pre-restart mutation confirmation must expire safely.
+14. Verify personal-task completion, every cron mutation (run, pause, resume and delete), and memory deletion require owner/chat/thread-bound exact confirmation and read-back. Verify Charline commands and callbacks cannot reveal private Memory in a group chat.
+15. Ask «Что важно сегодня?» with one calendar conflict, one overdue reminder, four ordinary items and one unavailable source. Verify the response leads with the conflict, overdue item and named source gap; retains source handles; shows at most three ordinary items per source plus the hidden count; ends with observation time/timezone; and contains no raw alert codes or tool traces.
 
 ## Release decision
 

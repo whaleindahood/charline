@@ -91,7 +91,7 @@
   {
     "id": "command-center.read-only",
     "request": "Покажи, что сегодня требует моего внимания в календаре, почте, документах и задачах",
-    "expected": ["Read requested sources", "Preserve empty versus unavailable", "Report conflicts and overdue reminders", "Perform no external writes"],
+    "expected": ["Read requested sources", "Prioritize items needing attention", "Preserve empty versus unavailable", "Name unavailable sources", "Report conflicts and overdue reminders", "Retain source handles and freshness", "Limit ordinary detail per source", "Perform no external writes"],
     "external_write": "none",
     "required_trace": ["source_read", "partial_failure_report"]
   },
@@ -156,21 +156,21 @@
   {
     "id": "projects.create-native-confirmed",
     "request": "Создай проект Charline",
-    "expected": ["Normalize the name", "Show exact topic preview", "Wait for explicit confirmation", "Create through Hermes native topic action once", "Read back dm_topics metadata"],
-    "external_write": "confirm",
-    "required_trace": ["native_topic_preview", "native_platform_action", "native_metadata_read_back"]
+    "expected": ["Normalize the name", "Create through Hermes native topic action once", "Forward the complete original request", "Start a normal Hermes turn in the topic", "Read back dm_topics metadata"],
+    "external_write": "none",
+    "required_trace": ["native_platform_action", "original_request_forwarded", "topic_agent_turn", "native_metadata_read_back"]
   },
   {
     "id": "delivery.origin-main-and-project",
     "request": "Запусти фоновую задачу и напоминание сначала здесь, затем отдельно в проекте A",
-    "expected": ["Do not create a project for background work", "Return Main completions to Main", "Return project completions to project A", "Use Hermes delegation and cron only"],
+    "expected": ["Let the model choose direct versus durable project work", "Return Main completions to Main", "Return project completions to project A", "Use Hermes delegation, Kanban and cron only"],
     "external_write": "none",
-    "required_trace": ["main_origin_captured", "project_origin_captured", "background_origin_delivery", "cron_origin_delivery"]
+    "required_trace": ["main_origin_captured", "project_origin_captured", "background_origin_delivery", "kanban_origin_delivery", "cron_origin_delivery"]
   },
   {
     "id": "ui.conversation-first-daily-menu",
     "request": "Открой основное меню Charline",
-    "expected": ["Show five daily navigation entries", "Keep capabilities conversational", "Keep commands manually reachable"],
+      "expected": ["Show Today Projects personal Tasks Schedules and Settings", "Do not present agent processes as personal tasks", "Keep capabilities conversational", "Keep technical commands manually reachable"],
     "external_write": "none",
     "required_trace": ["curated_daily_menu", "conversation_first", "technical_commands_preserved"]
   },

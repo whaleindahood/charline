@@ -22,8 +22,9 @@ Return a short list with natural language examples:
 - Reminders and briefings — confirmed one-time or recurring Hermes cron work: `Напомни завтра оплатить счёт`.
 - Workspace — Drive, Docs, Sheets and Contacts: `Найди документ с планом проекта`.
 - Research — sourced analysis with bounded delegation: `Сравни три варианта и приведи источники`.
-- Projects — `/projects new <name>` creates a native Telegram Private Chat Topic with its own Hermes session: `Создай отдельный проект для ремонта и веди задачи там`.
-- Task control — `/tasks` opens the current-chat task center with refresh and scoped stop controls; ordinary cancellation wording remains supported.
+- Projects — substantial artifact work is moved with its complete original request into a native Telegram topic and starts there immediately: `Создай сайт для моего бизнеса`.
+- Personal tasks — `/tasks` shows the owner's remembered actions, not agents or shell processes: `Запомни, мне нужно сделать лабораторную`.
+- Active project work — Hermes reports progress, blockers and verified results in the project topic; native Kanban is used when durable stages or workers must survive a restart.
 - Developer work — repository analysis, tests and confirmed deployment: `Проверь проект и предложи исправления`.
 
 Finish with: "Напишите или надиктуйте задачу обычными словами." Mention `/commands` as the complete technical Hermes command catalog only when the user asks about commands or administration.
@@ -34,19 +35,21 @@ Use normal Markdown headings, lists and links. Use Markdown tables only for comp
 
 ## Native Telegram Panel
 
-The persistent daily menu exposes only `Сегодня`, `Проекты`, `Задачи`, `Расписания` and `Настройки`. `/commands` remains manually available; hidden technical commands and domain capabilities are not disabled.
+The persistent daily menu exposes `Сегодня`, `Проекты`, `Задачи`, `Расписания` and `Настройки`. `/commands` remains manually available. Hidden technical commands and domain capabilities are not disabled.
 
-In Main, `/charline` shows a compact status snapshot plus those five actions. In a configured native project topic, it shows the exact project's title, meaningful tasks and project-scoped actions. Calendar, Mail, Files, Research, Remember and New Task are normal text/voice intents, not Home launchers. `Новый проект` exists only inside Projects and leads to the same exact-preview `ProjectService` used by `/projects new` and the model tool.
+In Main, `/charline` invites ordinary text or voice. Its compact card links to Projects, personal Tasks, Schedules and Settings; `Сегодня` is the main model-backed daily brief command. Calendar, Mail, Files and Research remain natural-language intents rather than one button per integration. In a configured project topic, normal text continues that project's Hermes session.
+
+When the owner asks to remember an actionable personal task, use native Hermes Memory with one exact entry prefixed `Задача: `. The model decides the useful wording; do not select from a coded intent list or question tree. A due-time reminder is a separate native Hermes cron job when requested or clearly implied. `/tasks` filters only these entries and completion removes the exact entry after confirmation.
 
 Read-only cards are reconstructed from callback chat/thread and Hermes-owned state and edit the same Telegram message. They do not rely on a menu closure or inject administrative messages into a project transcript. Stop-all, cron deletion, memory deletion and external writes retain short-lived explicit confirmations.
 
-The root DM is permanent Main. A project topic keeps its own ordinary Hermes session and is never merged into Main or another project. Charline never chooses the last-used project and never activates upstream `/topic` mode.
+The root DM is permanent Main. Ordinary questions and small operations stay there. When durable context or substantial artifact work is useful, call `charline_projects(action="start", name=..., task=...)` once with the owner's complete request; the native topic is created/reused and Hermes starts the task inside it. A project topic keeps its own ordinary Hermes session and is never merged into Main or another project. A topic is not a repository: several topics may use the same workspace.
 
 On Gateway startup, restore Telegram's native command menu so a stale Web App button cannot keep opening an obsolete tunnel.
 
 ## Native Hermes Boundary
 
-Accept natural language and voice through the existing Hermes Gateway. After the user chooses or states a task, load the matching domain skill and follow `charline-orchestration`. Use native Hermes sessions, Memory, `clarify`, `delegate_task`, `/background`, cron and project topics directly.
+Accept natural language and voice through the existing Hermes Gateway. The model itself decides whether to answer, clarify, read a source, use tools, create a project, delegate, schedule cron or use Kanban. Follow `charline-orchestration`; never replace model judgment with a Charline intent enum or scripted question sequence.
 
 This skill does not implement a router, command dispatcher, Telegram handler, session store, scheduler, memory store or tool registry. It does not perform external writes, source reads or background work merely to display the menu.
 

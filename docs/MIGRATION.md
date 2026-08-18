@@ -17,7 +17,7 @@ Repository implementation and live-profile activation are separate operations. D
 4. Set `platforms.telegram.extra.ignore_root_dm: false` (or remove the key) so root DM is processed normally.
 5. Keep existing valid `platforms.telegram.extra.dm_topics` entries. Reconcile only confirmed Charline project topics; never guess a missing `thread_id` or redirect it to another project.
 6. Install and enable `plugins/charline`, then explicitly grant `gateway.platform_actions` to that plugin.
-7. Configure the five-entry `command_menu.visible` and the `tasks: charline_tasks` rewrite shown in `OPERATIONS.md`; do not delete the underlying Hermes commands.
+7. Configure the five-entry owner menu and the `tasks: charline_tasks` rewrite shown in `OPERATIONS.md`; do not delete the underlying Hermes commands.
 8. Start exactly one Gateway and run repository health checks.
 9. In Main, send ordinary text and Russian voice; verify both keep the root session key before and after creating project A.
 10. Create A with `/projects new A`, send messages in A, return to Main, create B, and verify Main/A/B use three distinct native Hermes session keys with no context bleed.

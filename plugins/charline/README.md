@@ -1,12 +1,12 @@
 # Charline Hermes plugin
 
-This standalone plugin adds contextual `/charline`, `/today`, `/projects`, `/schedules`, `/settings`, the Telegram Task Center and `charline_projects` through Hermes extension points. It does not own polling, routing, sessions, memory, cron or workers.
+This standalone plugin adds `/charline`, model-backed `/today`, `/projects`, personal `/tasks`, `/schedules`, `/settings` and `charline_projects` through Hermes extension points. It does not own polling, routing, sessions, memory, cron, Kanban or workers.
 
-The Charline UI is private-chat only. Cards use short deterministic references for Hermes entities, while every task interruption, schedule mutation and memory deletion shows an exact owner/chat/thread-bound confirmation before the write.
+The Charline UI is private-chat only. Personal tasks are exact `Задача: ` entries in native Hermes Memory; they are not delegations or processes. Cards use short deterministic references, while personal-task completion, schedule mutation and memory deletion show an owner/chat/thread-bound confirmation before the write.
 
 Install from this repository's subdirectory at an immutable commit, enable `charline`, and explicitly grant `gateway.platform_actions`. Telegram Threaded Mode must be enabled and `platforms.telegram.extra.ignore_root_dm` must remain false.
 
-Project creation is two-step: `/projects new <name>` returns an exact preview and one-use confirmation command; only `/projects confirm <digest>` calls Hermes' native topic action. The confirmation is consumed before the write. An unknown outcome is never retried automatically and requires manual Telegram/`dm_topics` reconciliation.
+`/projects new <name>` explicitly creates/reuses an empty native topic. For a substantial natural-language request, the model calls `charline_projects(start)` with the complete request; Hermes creates/reuses the topic and begins a normal agent turn there immediately. An unknown topic-creation outcome is never retried automatically and requires Telegram/`dm_topics` reconciliation.
 
 `/projects` reads `platforms.telegram.extra.dm_topics`; it owns no project database and does not write to project transcripts.
 

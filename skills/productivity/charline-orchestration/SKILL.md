@@ -28,7 +28,7 @@ Use when a request spans domains, tools, specialists, recurring work or multiple
 4. **Bounded complex task** — delegate isolated reasoning-heavy work and verify its artifacts.
 5. **Recurring task** — create a self-contained cron job after schedule confirmation.
 6. **Persistent goal** — use native `/goal` for one measurable multi-turn outcome the user wants to steer, pause or resume.
-7. **Durable multi-worker project** — use Kanban only when several workers need task state that survives process restarts.
+7. **Durable project execution** — use native Kanban when stages, handoffs, blockers or unattended work must survive a restart; enable goal mode/review when completion needs an explicit judge.
 
 Choose the simplest shape that preserves correctness. Load domain skills from their trigger descriptions instead of maintaining a universal intent enum.
 
@@ -51,7 +51,7 @@ For Google Workspace writes, use the official `google_api.py` mutation path. Her
 
 Delegate when isolation or parallel evidence gathering improves reliability. Pass a self-contained brief with goal, constraints, workspace, allowed side effects, language, completion criteria and required evidence. Treat child summaries as claims until the main agent verifies paths, URLs, status or test output.
 
-For independent tasks, use one native `delegate_task` batch with `tasks: [...]`; Hermes runs children concurrently up to `delegation.max_concurrent_children`. Charline permits maximum two active subagents; wait for one active worker to finish before starting a third. Use `background=true` when the user should keep talking while work continues. Dependencies stay sequential, and dependent results return to the main session before the next step starts.
+For independent bounded tasks, use one native `delegate_task` batch with `tasks: [...]`; Hermes runs children concurrently up to its configured `delegation.max_concurrent_children`. Charline adds no smaller concurrency cap. Use `background=true` when the user should keep talking while work continues. Dependencies stay sequential, and dependent results return to the main session before the next step starts.
 
 Telegram remains one assistant interface. Ordinary direct-message conversation stays the default:
 
@@ -60,12 +60,14 @@ Telegram remains one assistant interface. Ordinary direct-message conversation s
 - the Telegram root DM is permanent Main and always remains an ordinary conversational Hermes session;
 - each Charline project is a native Telegram Private Chat Topic whose `chat_id + thread_id` produces its own normal Hermes session; never recover a root message into the latest project;
 - `/topic` is a separate advanced upstream feature; Charline does not require, enable or override it and does not use its bindings as project state;
-- `/projects new <name>`, `Проекты → Новый проект` and the model-facing project tool share one deterministic service over Hermes `dm_topics` metadata;
+- `/projects new <name>` creates an empty native topic only when the owner explicitly uses the command; for a natural substantial request call `charline_projects(action="start")` with the complete original request so Hermes immediately continues inside the created/reused topic;
 - `/projects` is a read-only view of native project metadata and never injects administrative summary messages into project transcripts;
-- `/tasks` opens Charline's current-chat task center and shows current-chat work only; it edits one Telegram message in place, shows friendly labels, `needs input`, active states and recent results, and keeps unrelated sessions and Gateway service jobs hidden. `/agents` remains a manually reachable upstream technical diagnostic;
+- `/tasks` shows the owner's remembered personal tasks and never aliases delegations, processes or Gateway jobs. Technical agent/process diagnostics remain available through upstream commands when explicitly requested;
 - individual task stop controls act only on exact current-session work; `Остановить всё` requires a separate owner/chat/thread-bound confirmation.
 
-Main and every project topic keep separate conversation history, `/goal`, `/background`, `/tasks` and cancellation; each session compacts independently. A background result and a cron reminder return to their originating Main/topic route. Project creation never creates a worker; background work never creates a project. Use Kanban only when several workers share dependencies and task state must survive a Gateway or worker restart; conversation topics alone are not a reason to enable it.
+Main and every project topic keep separate conversation history, goal/background execution and cancellation; each session compacts independently. A background result, Kanban result and cron reminder return to their exact originating Main/topic route. Topic creation for a substantial request dispatches that request through the normal Hermes agent path in the new topic. Use native Kanban for durable multi-stage, multi-worker, review or unattended work; use direct execution/delegation for bounded work.
+
+Inside a chosen project workspace, act like Codex/Claude Code in agent mode: inspect, plan, edit, run commands, test and continue until a verified result or real blocker. The model chooses the workspace from context and may reuse one repository across topics. Deployment/publication occurs when the owner's request includes it or the owner asks later; do not infer a deploy target from generic development wording.
 
 ## Cancellation
 
@@ -88,7 +90,8 @@ Use `delegate_task` for bounded work, cron for recurring work and Kanban only fo
 - Hermes memory: compact stable preferences, identity, environment conventions and durable cross-project facts only.
 - Session history: Main/project conversations and outcomes, retrieved read-only with `session_search` when needed.
 - External systems: authoritative service data.
-- Project/task state: keep transient progress, TODOs, raw summaries and temporary paths in the project session or authoritative artifacts, never routine durable user memory.
+- Personal tasks explicitly requested with wording such as “запомни задачу” are stored as compact native Memory entries prefixed `Задача: ` so the `/tasks` view can reconstruct them without a new database. Remove the exact entry when completed.
+- Project execution state belongs in the project session, native Kanban or authoritative artifacts; never put raw progress logs or temporary paths into durable memory.
 
 Save corrected stable preferences proactively. Turn repeated verified procedures into reviewed skills. Do not perform uncontrolled self-modification.
 

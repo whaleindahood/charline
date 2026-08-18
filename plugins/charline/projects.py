@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import re
-import time
-from collections import OrderedDict
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Callable, Mapping
@@ -24,12 +22,7 @@ class NativeProject:
 class ProjectCreation:
     name: str
     thread_id: str
-
-
-@dataclass(frozen=True)
-class ProjectPreview:
-    name: str
-    digest: str
+    request_id: str = ""
 
 
 def normalize_project_name(value: str) -> str:
@@ -77,34 +70,43 @@ class ProjectService:
     def __init__(self, platform_actions: Any, config_loader: Callable[[], Mapping[str, Any]]):
         self._actions = platform_actions
         self._config_loader = config_loader
-        self._pending: OrderedDict[tuple[str, str, str, str], tuple[float, str]] = OrderedDict()
 
     def list(self, chat_id: str) -> list[NativeProject]:
         return list_native_projects(self._config_loader(), chat_id)
 
-    def prepare(
-        self, chat_id: str, user_id: str, raw_name: str, thread_id: str = ""
-    ) -> ProjectPreview:
+    async def create(self, chat_id: str, raw_name: str) -> ProjectCreation:
         name = normalize_project_name(raw_name)
-        digest = sha256(
-            f"{chat_id}\0{thread_id}\0{user_id}\0{name}".encode("utf-8")
-        ).hexdigest()[:16]
-        key = (str(chat_id), str(thread_id or ""), str(user_id), digest)
-        self._pending[key] = (time.monotonic(), name)
-        self._pending.move_to_end(key)
-        while len(self._pending) > 64:
-            self._pending.popitem(last=False)
-        return ProjectPreview(name=name, digest=digest)
-
-    async def confirm(
-        self, chat_id: str, user_id: str, digest: str, thread_id: str = ""
-    ) -> ProjectCreation:
-        key = (str(chat_id), str(thread_id or ""), str(user_id), str(digest).strip())
-        pending = self._pending.pop(key, None)
-        if pending is None or time.monotonic() - pending[0] > 600:
-            raise RuntimeError("Подтверждение устарело. Сначала снова покажите preview.")
-        name = pending[1]
         result = await self._actions.ensure_private_topic("telegram", str(chat_id), name)
+        return self._verified_creation(chat_id, name, result)
+
+    async def start(
+        self, chat_id: str, user_id: str, raw_name: str, task: str
+    ) -> ProjectCreation:
+        name = normalize_project_name(raw_name)
+        task = str(task or "").strip()
+        if not task:
+            raise ValueError("Укажите исходную задачу проекта.")
+        request_id = "charline-" + sha256(
+            f"{chat_id}\0{name}\0{task}".encode("utf-8")
+        ).hexdigest()[:16]
+        result = await self._actions.start_private_topic_task(
+            "telegram",
+            str(chat_id),
+            name,
+            task,
+            owner_user_id=str(user_id),
+            request_id=request_id,
+        )
+        return self._verified_creation(chat_id, name, result, request_id=request_id)
+
+    def _verified_creation(
+        self,
+        chat_id: str,
+        name: str,
+        result: Mapping[str, Any],
+        *,
+        request_id: str = "",
+    ) -> ProjectCreation:
         if not result.get("ok") or not result.get("thread_id"):
             detail = result.get("detail") or result.get("error") or "unknown error"
             if result.get("error") == "outcome_unknown":
@@ -123,4 +125,4 @@ class ProjectService:
                 "Проект мог быть создан, но read-back dm_topics не подтвердил результат; "
                 "не повторяйте запись до ручной проверки."
             )
-        return ProjectCreation(name=name, thread_id=thread_id)
+        return ProjectCreation(name=name, thread_id=thread_id, request_id=request_id)

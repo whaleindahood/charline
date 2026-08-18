@@ -54,8 +54,8 @@ If Google reports `invalid_grant` or a revoked token, use the installed Google W
             tasks: charline_tasks
   ```
 
-  `/commands` and `/agents` remain manually dispatchable. The rewrite affects only the no-argument Telegram `/tasks` entry.
-- Keep `ignore_root_dm: false`: root DM is permanent Main. Charline projects use configured native Private Chat Topics in `platforms.telegram.extra.dm_topics`; do not enable or depend on upstream `/topic` for project routing. `/projects` is the read-only overview. Do not use Kanban unless shared durable worker state is required.
+  `/commands` and operator diagnostics remain manually dispatchable. The rewrite affects only the no-argument Telegram `/tasks` entry and gives that menu item Charline's personal-task description.
+- Keep `ignore_root_dm: false`: root DM is permanent Main. Charline projects use configured native Private Chat Topics in `platforms.telegram.extra.dm_topics`; do not enable or depend on upstream `/topic` for project routing. `/projects` is the read-only overview. Use native Kanban for restart-safe multi-stage/unattended project work, not for ordinary chat replies.
 - Do not start a second process with the same Telegram bot token.
 - Use Hermes Desktop/Dashboard for session, cron, skill and process inspection.
 

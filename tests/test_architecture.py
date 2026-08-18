@@ -68,6 +68,8 @@ def test_hermes_patch_is_pinned_and_carries_runtime_tests():
     assert len(base) == 40
     assert "hermes_cli/platform_actions.py" in patch
     assert "ensure_private_topic" in patch
+    assert "start_private_topic_task" in patch
+    assert "dispatch_agent_turn" in patch
     assert "tests/hermes_cli/test_platform_actions.py" in patch
     assert "send_card" in patch
     assert "plugin_callback" in patch

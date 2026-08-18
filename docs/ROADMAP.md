@@ -50,7 +50,7 @@ Exit criteria: RED–GREEN–REFACTOR workflow; architecture guard against a sec
 
 Goal: make the existing Hermes chat the complete assistant interface. Natural language and voice must reach the same domain skills without a second router, session system or Mini App.
 
-Exit criteria: the daily picker is Today/Projects/Tasks/Schedules/Settings; Main and project `/charline` cards are contextual; ordinary read navigation is restart-safe and edits in place; mutation confirmations remain ephemeral; root DM remains permanent Main; native project topics retain isolated Hermes sessions; `/projects new <name>`, its UI action and the model-facing tool share one service; `/topic` is not required; background and cron completions return to their exact origin; `/projects` and summaries are read-only native-state views; Task Center hides fast foreground answers and Gateway jobs; confirmed writes retain exact preview and read-back.
+Exit criteria: the picker is Today/Projects/Tasks/Schedules/Settings; `/today` starts a model-backed live brief; `/tasks` contains personal owner tasks rather than agent processes; root DM remains permanent Main; a substantial natural request creates/reuses a native project topic and begins there without requiring the user to repeat it; durable project work uses native Kanban and returns status/results to the exact topic; `/topic` is not required; external writes retain exact preview and read-back.
 
 Daily surfaces remain thin views over Hermes and Google state. Project cards use deterministic metadata only; they never add administrative summary prompts to a project transcript. No duplicate state store was added.
 
@@ -58,7 +58,7 @@ Daily surfaces remain thin views over Hermes and Google state. Project cards use
 
 - Additional services through narrow least-privileged skills.
 - Optional polish after live use: pagination for more than ten projects or twelve memory entries, only when real usage reaches those limits.
-- Durable multi-worker Kanban only when several workers share dependencies and their task state must survive Gateway/worker restarts; ordinary parallel requests and separate project chats do not qualify.
+- Optional richer project index over native Kanban metadata after live use proves it useful; do not add a second board or project database.
 - Mini App, tunnel, reverse proxy or custom web client.
 
 Permanently excluded: a second agent runtime, scheduler, memory store, session system, delegation engine, universal router or autonomous unconfirmed external writes.

@@ -28,7 +28,7 @@ index 1439cc601..c736cbea0 100644
      def _make_profile_platform_event_handler(self, profile_name: str):
          """Bind platform-event auth and hook dispatch to one multiplex profile."""
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index 350ee7411..19c159d70 100644
+index 350ee7411..af55f7553 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -769,13 +769,40 @@ def _telegram_command_menu_config() -> dict[str, Any]:
@@ -72,7 +72,7 @@ index 350ee7411..19c159d70 100644
  def telegram_menu_max_commands() -> int:
      """Return configured Telegram BotCommand menu cap with safe bounds."""
      return int(_telegram_command_menu_config()["max_commands"])
-@@ -1066,6 +1093,19 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
+@@ -1066,6 +1093,20 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
      )
      # Drop the cmd_key — Telegram only needs (name, desc) pairs.
      all_commands.extend((n, d) for n, d, _k in entries)
@@ -81,9 +81,10 @@ index 350ee7411..19c159d70 100644
 +        by_name = {name: description for name, description in all_commands}
 +        selected = []
 +        for requested in visible:
-+            description = by_name.get(requested)
++            target = _telegram_command_menu_config()["rewrites"].get(requested, requested)
++            description = by_name.get(target)
 +            if description is None:
-+                resolved = resolve_command(requested)
++                resolved = resolve_command(target)
 +                canonical = _sanitize_telegram_name(resolved.name) if resolved else ""
 +                description = by_name.get(canonical)
 +            if description is not None:
@@ -93,14 +94,16 @@ index 350ee7411..19c159d70 100644
  
  
 diff --git a/hermes_cli/platform_actions.py b/hermes_cli/platform_actions.py
-index 52e0b68fc..82c819f72 100644
+index 52e0b68fc..90544331d 100644
 --- a/hermes_cli/platform_actions.py
 +++ b/hermes_cli/platform_actions.py
-@@ -16,8 +16,10 @@ v1 verb set
+@@ -16,8 +16,12 @@ v1 verb set
  -----------
  * ``add_reaction(platform, chat_id, message_id, emoji)``
  * ``set_thread_title(platform, chat_id, thread_id, title)``
++* ``dispatch_agent_turn(platform, chat_id, prompt, owner_user_id, thread_id)``
 +* ``ensure_private_topic(platform, chat_id, title)``
++* ``start_private_topic_task(platform, chat_id, title, task, owner_user_id, request_id)``
 +* ``send_card(platform, chat_id, text, buttons, thread_id, owner_user_id)``
  
 -Both return a structured result dict — ``{"ok": True, ...}`` on success,
@@ -108,7 +111,7 @@ index 52e0b68fc..82c819f72 100644
  ``{"ok": False, "error": <code>, "detail": <str>}`` on failure — and never
  raise into hook dispatch. Error codes are part of the v1 contract:
  ``capability_not_granted``, ``invalid_argument``, ``gateway_unavailable``,
-@@ -205,6 +207,101 @@ class PlatformActions:
+@@ -205,6 +209,231 @@ class PlatformActions:
          self._audit("set_thread_title", platform, result)
          return result
  
@@ -158,6 +161,136 @@ index 52e0b68fc..82c819f72 100644
 +            # instead of blindly retrying.
 +            result = _err("outcome_unknown", str(exc)[:512])
 +        self._audit("ensure_private_topic", platform, result)
++        return result
++
++    async def dispatch_agent_turn(
++        self,
++        platform: str,
++        chat_id: str,
++        prompt: str,
++        owner_user_id: str,
++        thread_id: str = "",
++    ) -> Dict[str, Any]:
++        """Dispatch a plugin-authored prompt through the normal agent path."""
++        adapter, error = self._gate(
++            platform,
++            chat_id=chat_id,
++            prompt=prompt,
++            owner_user_id=owner_user_id,
++        )
++        if error is not None or adapter is None:
++            self._audit(
++                "dispatch_agent_turn",
++                platform,
++                error or _err("gateway_unavailable"),
++            )
++            return error or _err("gateway_unavailable")
++        try:
++            from gateway.platforms.base import MessageEvent
++            from gateway.session import SessionSource
++
++            source = SessionSource(
++                platform=adapter.platform,
++                chat_id=str(chat_id),
++                chat_type="dm",
++                user_id=str(owner_user_id),
++                user_name="Owner",
++                thread_id=str(thread_id) if thread_id else None,
++            )
++            await adapter.handle_message(MessageEvent(
++                text=str(prompt).strip(),
++                source=source,
++                user_id=str(owner_user_id),
++                user_name="Owner",
++                internal=True,
++                metadata={"plugin_id": self._plugin_id},
++            ))
++            result = _ok(action="dispatch_agent_turn")
++        except Exception as exc:
++            result = _err("action_failed", str(exc)[:512])
++        self._audit("dispatch_agent_turn", platform, result)
++        return result
++
++    async def start_private_topic_task(
++        self,
++        platform: str,
++        chat_id: str,
++        title: str,
++        task: str,
++        owner_user_id: str,
++        request_id: str = "",
++    ) -> Dict[str, Any]:
++        """Create/reuse a Telegram topic and dispatch the owner's task there."""
++        adapter, error = self._gate(
++            platform,
++            chat_id=chat_id,
++            title=title,
++            task=task,
++            owner_user_id=owner_user_id,
++        )
++        if error is not None or adapter is None:
++            self._audit(
++                "start_private_topic_task",
++                platform,
++                error or _err("gateway_unavailable"),
++            )
++            return error or _err("gateway_unavailable")
++        try:
++            if getattr(adapter.platform, "value", None) != "telegram":
++                result = _err(
++                    "unsupported_platform_action",
++                    f"start_private_topic_task is not implemented for {platform}",
++                )
++            else:
++                thread_id = await adapter.ensure_dm_topic(
++                    chat_id, title, force_create=False
++                )
++                if not thread_id:
++                    result = _err(
++                        "outcome_unknown",
++                        "telegram returned no private-topic id; inspect native state before retrying",
++                    )
++                else:
++                    from gateway.platforms.base import MessageEvent
++                    from gateway.session import SessionSource
++
++                    project_request = str(request_id or "").strip()
++                    prefix = (
++                        "[This is the owner's original request moved from Main "
++                        f"into project topic {title!r}. Project request id: "
++                        f"{project_request or 'not-set'}. Treat the text below "
++                        "as the user's request. Use native Hermes Kanban with "
++                        "this request id as its idempotency key when durable "
++                        "multi-stage work is needed.]\n\n"
++                    )
++                    source = SessionSource(
++                        platform=adapter.platform,
++                        chat_id=str(chat_id),
++                        chat_name=str(title),
++                        chat_type="dm",
++                        user_id=str(owner_user_id),
++                        user_name="Owner",
++                        thread_id=str(thread_id),
++                    )
++                    await adapter.handle_message(MessageEvent(
++                        text=prefix + str(task).strip(),
++                        source=source,
++                        user_id=str(owner_user_id),
++                        user_name="Owner",
++                        internal=True,
++                        metadata={
++                            "project_request_id": project_request,
++                            "project_title": str(title),
++                        },
++                    ))
++                    result = _ok(
++                        action="start_private_topic_task",
++                        thread_id=str(thread_id),
++                        request_id=project_request,
++                    )
++        except Exception as exc:
++            result = _err("outcome_unknown", str(exc)[:512])
++        self._audit("start_private_topic_task", platform, result)
 +        return result
 +
 +    async def send_card(
@@ -211,7 +344,7 @@ index 52e0b68fc..82c819f72 100644
  
      @staticmethod
 diff --git a/hermes_cli/plugin_capabilities.py b/hermes_cli/plugin_capabilities.py
-index c474ea037..0a591db4e 100644
+index c474ea037..9ebe0dc16 100644
 --- a/hermes_cli/plugin_capabilities.py
 +++ b/hermes_cli/plugin_capabilities.py
 @@ -125,7 +125,8 @@ CAPABILITY_REGISTRY: Dict[str, CapabilitySpec] = {
@@ -219,7 +352,7 @@ index c474ea037..0a591db4e 100644
              description=(
                  "Act on connected chat platforms as the gateway bot "
 -                "(add reactions, rename threads) via ctx.platform_actions"
-+                "(add reactions, rename threads, ensure private topics, send cards) via "
++                "(add reactions, rename threads, dispatch agent turns, ensure private topics, send cards) via "
 +                "ctx.platform_actions"
              ),
          ),
@@ -624,7 +757,7 @@ index 000000000..f6f2fc4a3
 +
 +    query.answer.assert_awaited_once_with(text="Не удалось открыть этот раздел.")
 diff --git a/tests/hermes_cli/test_commands.py b/tests/hermes_cli/test_commands.py
-index dc0b6e9b5..07176aafd 100644
+index dc0b6e9b5..62108459e 100644
 --- a/tests/hermes_cli/test_commands.py
 +++ b/tests/hermes_cli/test_commands.py
 @@ -26,6 +26,7 @@ from hermes_cli.commands import (
@@ -635,7 +768,7 @@ index dc0b6e9b5..07176aafd 100644
      telegram_menu_commands,
      telegram_menu_max_commands,
  )
-@@ -637,6 +638,36 @@ class TestDiscordSkillCmdKeyDispatch:
+@@ -637,6 +638,38 @@ class TestDiscordSkillCmdKeyDispatch:
  class TestTelegramMenuCommands:
      """Integration: telegram_menu_commands enforces the 32-char limit."""
  
@@ -652,6 +785,7 @@ index dc0b6e9b5..07176aafd 100644
 +            encoding="utf-8",
 +        )
 +        plugin_entries = [
++            ("charline", "Открыть Charline", ""),
 +            ("today", "Сегодня", ""),
 +            ("projects", "Проекты", ""),
 +            ("charline-tasks", "Задачи", ""),
@@ -664,6 +798,7 @@ index dc0b6e9b5..07176aafd 100644
 +        assert [name for name, _description in menu] == [
 +            "today", "projects", "tasks", "schedules", "settings"
 +        ]
++        assert dict(menu)["tasks"] == "Задачи"
 +        assert "commands" not in {name for name, _description in menu}
 +        assert resolve_command("commands") is not None
 +        assert telegram_command_menu_rewrite("/tasks") == "/charline_tasks"
@@ -673,24 +808,88 @@ index dc0b6e9b5..07176aafd 100644
  
  
 diff --git a/tests/hermes_cli/test_platform_actions.py b/tests/hermes_cli/test_platform_actions.py
-index c32bdad9c..468194a0f 100644
+index c32bdad9c..6ad126549 100644
 --- a/tests/hermes_cli/test_platform_actions.py
 +++ b/tests/hermes_cli/test_platform_actions.py
-@@ -45,6 +45,10 @@ def _telegram_adapter(connected=True):
+@@ -45,6 +45,11 @@ def _telegram_adapter(connected=True):
      a.is_connected = connected
      a._set_reaction = AsyncMock(return_value=True)
      a.rename_dm_topic = AsyncMock(return_value=None)
 +    a.ensure_dm_topic = AsyncMock(return_value="77")
++    a.handle_message = AsyncMock(return_value=None)
 +    a.send_plugin_card = AsyncMock(
 +        return_value=SimpleNamespace(success=True, message_id="99", error=None)
 +    )
      return a
  
  
-@@ -187,6 +191,77 @@ class TestStructuredErrors:
+@@ -187,6 +192,140 @@ class TestStructuredErrors:
  
  
  class TestVerbRouting:
++    def test_dispatch_agent_turn_routes_to_exact_chat_and_topic(self):
++        actions = PlatformActions("charline")
++        adapter = _telegram_adapter()
++        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
++            result = asyncio.run(actions.dispatch_agent_turn(
++                "telegram", "123", "Prepare today's personal brief",
++                owner_user_id="42", thread_id="77",
++            ))
++
++        assert result == {"ok": True, "action": "dispatch_agent_turn"}
++        event = adapter.handle_message.await_args.args[0]
++        assert event.internal is True
++        assert event.text == "Prepare today's personal brief"
++        assert event.source.chat_id == "123"
++        assert event.source.thread_id == "77"
++        assert event.source.user_id == "42"
++
++    def test_dispatch_agent_turn_requires_owner_and_prompt(self):
++        actions = PlatformActions("charline")
++        adapter = _telegram_adapter()
++        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
++            result = asyncio.run(actions.dispatch_agent_turn(
++                "telegram", "123", "", owner_user_id="",
++            ))
++
++        assert result["error"] == "invalid_argument"
++        adapter.handle_message.assert_not_awaited()
++
++    def test_start_private_topic_task_dispatches_original_request_into_topic(self):
++        actions = PlatformActions("charline")
++        adapter = _telegram_adapter()
++        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
++            result = asyncio.run(actions.start_private_topic_task(
++                "telegram", "123", "Build RAG", "Create a production RAG system",
++                owner_user_id="42", request_id="req-1",
++            ))
++
++        assert result == {
++            "ok": True,
++            "action": "start_private_topic_task",
++            "thread_id": "77",
++            "request_id": "req-1",
++        }
++        event = adapter.handle_message.await_args.args[0]
++        assert event.internal is True
++        assert event.source.chat_id == "123"
++        assert event.source.thread_id == "77"
++        assert event.source.user_id == "42"
++        assert "Create a production RAG system" in event.text
++        assert "req-1" in event.text
++
++    def test_start_private_topic_task_requires_owner_and_task(self):
++        actions = PlatformActions("charline")
++        adapter = _telegram_adapter()
++        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
++            result = asyncio.run(actions.start_private_topic_task(
++                "telegram", "123", "Build RAG", "", owner_user_id="",
++            ))
++
++        assert result["error"] == "invalid_argument"
++        adapter.ensure_dm_topic.assert_not_awaited()
++        adapter.handle_message.assert_not_awaited()
++
 +    def test_send_card_routes_without_exposing_adapter(self):
 +        actions = PlatformActions("charline")
 +        adapter = _telegram_adapter()
@@ -830,7 +1029,7 @@ index 4965363a0..3eff5f713 100644
      """Test-only: clear all state and tear down the executor + monitor."""
      global _executor, _executor_max_workers, _monitor_thread
 diff --git a/website/docs/user-guide/features/plugins.md b/website/docs/user-guide/features/plugins.md
-index 7c1979482..652103318 100644
+index 7c1979482..b2afdff10 100644
 --- a/website/docs/user-guide/features/plugins.md
 +++ b/website/docs/user-guide/features/plugins.md
 @@ -413,7 +413,7 @@ default**: every call re-checks the `gateway.platform_actions` capability
@@ -842,12 +1041,20 @@ index 7c1979482..652103318 100644
  hook dispatch):
  
  ```python
-@@ -423,18 +423,41 @@ result = await ctx.platform_actions.add_reaction(
+@@ -423,18 +423,52 @@ result = await ctx.platform_actions.add_reaction(
  result = await ctx.platform_actions.set_thread_title(
      platform="discord", chat_id="123", thread_id="456", title="New title",
  )
 +result = await ctx.platform_actions.ensure_private_topic(
 +    platform="telegram", chat_id="123", title="Project Alpha",
++)
++result = await ctx.platform_actions.dispatch_agent_turn(
++    platform="telegram", chat_id="123", prompt="Prepare today's brief",
++    owner_user_id="42", thread_id="",
++)
++result = await ctx.platform_actions.start_private_topic_task(
++    platform="telegram", chat_id="123", title="Project Alpha",
++    task="Build and test the site", owner_user_id="42", request_id="req-1",
 +)
 +result = await ctx.platform_actions.send_card(
 +    platform="telegram", chat_id="123", text="Projects",
@@ -862,7 +1069,10 @@ index 7c1979482..652103318 100644
 +Success is `{"ok": True, "action": <verb>}` (topic creation also returns
 +`thread_id`). `ensure_private_topic` is Telegram-only and idempotently reuses
 +an existing configured title; the Telegram adapter remains responsible for
-+topic creation and persistent `dm_topics` metadata. Failures are
++topic creation and persistent `dm_topics` metadata. `dispatch_agent_turn`
++re-enters the normal Hermes model path at an exact chat/thread route;
++`start_private_topic_task` combines that with idempotent topic creation and
++preserves the caller's request id. Failures are
  `{"ok": False, "error": <code>, "detail": <str>}` with stable error codes:
  `capability_not_granted`, `invalid_argument`, `gateway_unavailable`,
  `unknown_platform`, `adapter_not_registered`, `adapter_disconnected`,

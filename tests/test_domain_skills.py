@@ -60,12 +60,12 @@ class DomainSkillPolicyTests(unittest.TestCase):
         text = self.read_skill("charline")
         for phrase in (
             "persistent daily menu",
-            "сегодня",
-            "задачи",
+            "charline",
             "проекты",
+            "задачи",
             "расписания",
             "настройки",
-            "новый проект",
+            "charline_projects",
             "reconstructed from callback chat/thread",
             "do not rely on a menu closure",
             "permanent main",
@@ -90,17 +90,16 @@ class DomainSkillPolicyTests(unittest.TestCase):
     def test_orchestration_defines_native_parallel_task_contract(self):
         text = self.read_skill("charline-orchestration")
         for phrase in (
-            "independent tasks",
+            "independent bounded tasks",
             "tasks: [...]",
             "background=true",
             "delegation.max_concurrent_children",
             "/background",
             "permanent main",
-            "/agents",
             "/stop",
             "/goal",
             "dependencies stay sequential",
-            "maximum two active subagents",
+            "charline adds no smaller concurrency cap",
             "partial failure",
             "ordinary direct-message conversation stays the default",
             "process-local",
@@ -112,10 +111,10 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "/projects",
             "read-only view",
             "/projects new <name>",
-            "background result and a cron reminder return to their originating main/topic route",
+            "return to their exact originating main/topic route",
             "each session compacts independently",
-            "recent results",
-            "needs input",
+            "charline_projects(action=\"start\")",
+            "native kanban",
         ):
             self.assertIn(phrase, text)
 
@@ -131,10 +130,7 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "do not guess",
             "exact target",
             "explicitly asks to stop all",
-            "individual task stop controls",
-            "requires a separate owner/chat/thread-bound confirmation",
             "gateway async jobs are service internals",
-            "current-chat work only",
             "service jobs stay hidden",
         ):
             self.assertIn(phrase, text)

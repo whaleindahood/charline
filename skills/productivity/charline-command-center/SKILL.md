@@ -28,7 +28,9 @@ Use for “what needs my attention,” morning command-center views and cross-do
 4. Normalize source results using `references/snapshot-contract.md`.
 5. Keep normalized data ephemeral; do not create a local Google data mirror.
 6. Run `scripts/compose_daily_brief.py` through stdin.
-7. Return concise priorities, conflicts, overdue reminders and per-section failures with source handles.
+7. Render the answer attention-first: conflicts, overdue reminders and unavailable sources before ordinary items.
+8. Show no more than three ordinary items per source, report the hidden count, retain source handles and finish with the observation time and timezone.
+9. Synthesize what matters; never expose raw alert codes, tool traces or an unranked source dump as the primary answer.
 
 ## Failure Policy
 
@@ -42,4 +44,8 @@ Preserve `empty` versus `unavailable`. One source failure makes the result parti
 - [ ] Stable source handles retained
 - [ ] Partial failures localized
 - [ ] Calendar conflicts and overdue reminders surfaced
+- [ ] Unavailable sources named in user language
+- [ ] At most three ordinary items per source, with hidden count
+- [ ] Source handles and freshness footer retained
+- [ ] No raw alert codes or tool traces exposed
 - [ ] No external write or recurring job created

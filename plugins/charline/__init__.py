@@ -72,24 +72,8 @@ class CharlinePlugin:
         head, _, tail = args.partition(" ")
         if head.casefold() == "new":
             try:
-                preview = self.projects.prepare(
-                    source.chat_id, source.user_id, tail,
-                    str(getattr(source, "thread_id", None) or ""),
-                )
-            except ProjectNameError as exc:
-                return str(exc)
-            return (
-                f"Точное действие: Создать Telegram-проект «{preview.name}».\n"
-                "Это создаст внешний Telegram topic. Для явного подтверждения: "
-                f"/projects confirm {preview.digest}"
-            )
-        if head.casefold() == "confirm":
-            try:
-                created = await self.projects.confirm(
-                    source.chat_id, source.user_id, tail,
-                    str(getattr(source, "thread_id", None) or ""),
-                )
-            except RuntimeError as exc:
+                created = await self.projects.create(source.chat_id, tail)
+            except (ProjectNameError, RuntimeError) as exc:
                 return str(exc)
             return (
                 f"✅ Проект «{created.name}» создан. "
@@ -99,26 +83,27 @@ class CharlinePlugin:
             return "Использование: /projects или /projects new <название>"
         return await self._send_card(self.ui.projects(source), source)
 
-    def projects_tool(self, params: Mapping[str, Any], **_: Any) -> str:
-        """Prepare a safe project action; the write stays behind explicit command confirmation."""
+    async def projects_tool(self, params: Mapping[str, Any], **_: Any) -> str:
+        """List projects or start the owner's original request in a native topic."""
         action = str(params.get("action") or "list")
-        if action == "prepare_create":
+        if action == "start":
             try:
                 source = self._telegram_source(self.current_request())
-                preview = self.projects.prepare(
+                created = await self.projects.start(
                     source.chat_id,
                     source.user_id,
                     str(params.get("name") or ""),
-                    str(getattr(source, "thread_id", None) or ""),
+                    str(params.get("task") or ""),
                 )
-            except (ProjectNameError, RuntimeError) as exc:
+            except (ProjectNameError, RuntimeError, ValueError) as exc:
                 return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
             return json.dumps(
                 {
                     "ok": True,
-                    "confirmation_required": True,
-                    "preview": f"Создать Telegram-проект «{preview.name}»",
-                    "confirmation_command": f"/projects confirm {preview.digest}",
+                    "started": True,
+                    "name": created.name,
+                    "thread_id": created.thread_id,
+                    "request_id": created.request_id,
                 },
                 ensure_ascii=False,
             )
@@ -163,13 +148,24 @@ class CharlinePlugin:
         if (raw_args or "").strip():
             return "Использование: /today"
         source = self._telegram_source(self.current_request())
-        return await self._send_card(self.ui.today(source), source)
+        result = await self.actions.dispatch_agent_turn(
+            platform="telegram",
+            chat_id=str(source.chat_id),
+            prompt=(
+                "Собери мою актуальную сводку на сегодня. Проверь календарь, личные задачи, "
+                "напоминания и важные результаты проектов. Сначала покажи то, что требует "
+                "внимания; явно назови недоступные источники и время проверки."
+            ),
+            owner_user_id=str(source.user_id or ""),
+            thread_id=str(source.thread_id or ""),
+        )
+        return None if result.get("ok") else "Не удалось собрать сводку. Попробуйте ещё раз."
 
     async def tasks_command(self, raw_args: str) -> None | str:
         if (raw_args or "").strip():
             return "Использование: /tasks"
         source = self._telegram_source(self.current_request())
-        return await self._send_card(self.ui.tasks(source), source)
+        return await self._send_card(self.ui.personal_tasks(source), source)
 
     async def schedules_command(self, raw_args: str) -> None | str:
         if (raw_args or "").strip():
@@ -234,13 +230,13 @@ def register(ctx: Any) -> None:
     ctx.register_command(
         name="charline",
         handler=plugin.charline_command,
-        description="Открыть меню личного ассистента Charline",
+        description="Открыть Charline",
     )
     ctx.register_command(
         name="projects",
         handler=plugin.projects_command,
         description="Показать или создать Telegram-проект",
-        args_hint="[new <название> | confirm <код>]",
+        args_hint="[new <название>]",
     )
     ctx.register_command(
         name="today",
@@ -268,18 +264,24 @@ def register(ctx: Any) -> None:
         schema={
             "name": "charline_projects",
             "description": (
-                "List native Charline Telegram projects or prepare an exact project "
-                "creation preview. Creation is never performed by this tool: after "
-                "the user confirms the preview, use the returned /projects confirm command."
+                "List native Charline Telegram projects or move the owner's original "
+                "request into a persistent project topic and start Hermes there. Use "
+                "start only when the model judges that durable project context is useful; "
+                "ordinary questions and small direct operations stay in the current chat."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "prepare_create"]},
+                    "action": {"type": "string", "enum": ["list", "start"]},
                     "name": {"type": "string"},
+                    "task": {
+                        "type": "string",
+                        "description": "The owner's complete original request, without rewriting or loss.",
+                    },
                 },
                 "required": ["action"],
             },
         },
         handler=plugin.projects_tool,
+        is_async=True,
     )

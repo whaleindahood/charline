@@ -4,7 +4,7 @@ Hermes remains the usage source of truth. `scripts/usage_report.py` reads aggreg
 
 ## Default guardrails
 
-- maximum two active subagents;
+- use Hermes' configured `delegation.max_concurrent_children`; Charline adds no separate cap;
 - no duplicate worker goal while the first worker is active;
 - one retry only after the prior worker has ended and its evidence was inspected;
 - rotate or compact a session at 120 messages;
@@ -17,4 +17,4 @@ These thresholds are operational warnings, not provider quota calculations. Fres
 
 ## Response
 
-When a threshold is reached: finish the current safe atomic step, record durable facts/artifacts, start a fresh session, and do not copy unrelated conversation history. When delegation cap is reached, wait for one active worker to finish before launching another. Use Hermes Kanban only when pending work must survive a restart.
+When a threshold is reached: finish the current safe atomic step, record durable facts/artifacts, start a fresh session, and do not copy unrelated conversation history. When Hermes' configured delegation cap is reached, wait for capacity. Use native Kanban when project stages, handoffs or pending work must survive a restart.

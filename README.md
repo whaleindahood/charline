@@ -1,6 +1,6 @@
 # Charline
 
-Charline is a Hermes-native personal assistant product layer, not a second agent framework or only a calendar bot.
+Charline is the owner's personal ChatGPT plus Codex/Claude Code experience in Telegram, implemented as a thin product layer over Hermes Agent.
 
 ## Current status
 
@@ -9,6 +9,8 @@ V1 repository surface is implemented, including Phase 6 conversational UX behavi
 Repository completion and deployment to the active profile remain separate, reviewable operations even after production verification.
 
 ## Product contract
+
+The normative product definition is [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 - One existing Telegram bot and one permanent Main conversation in the root DM.
 - Hermes Agent owns the model loop, Telegram Gateway, sessions, memory, skills, cron and delegation.
@@ -42,4 +44,4 @@ The active Hermes profile remains the current `default` profile. This repository
 
 Charline projects require Telegram Threaded Mode and Hermes `dm_topics`; they do not require or automatically enable the separate upstream `/topic` multi-session mode. Keep `ignore_root_dm: false` so Main remains conversational. See [`docs/MIGRATION.md`](docs/MIGRATION.md) for the explicit live-profile migration.
 
-The daily Telegram picker contains only Today, Projects, Tasks, Schedules and Settings. Calendar, mail, files, research and memory writes remain available through ordinary text or voice; `/commands` remains the manually callable power-user catalog.
+The Telegram picker contains Today, Projects, personal Tasks, Schedules and Settings. Calendar, mail, files, research and developer work remain available through ordinary text or voice; `/commands` remains the manually callable power-user catalog.

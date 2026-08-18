@@ -16,7 +16,8 @@ class UsagePolicyTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "docs" / "USAGE_BUDGETS.md"
         ).read_text(encoding="utf-8").lower()
         self.assertNotIn("queue work", text)
-        self.assertIn("wait for one active worker to finish", text)
+        self.assertIn("hermes' configured delegation cap", text)
+        self.assertIn("wait for capacity", text)
 
     def test_active_subagents_must_be_an_integer(self):
         with self.assertRaisesRegex(ValueError, "active_subagents"):

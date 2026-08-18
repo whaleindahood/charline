@@ -18,7 +18,7 @@ This skill defines reliable read-only briefings delivered through Hermes cron. I
 
 ## When to Use
 
-Use for morning/evening summaries, weekly planning, inbox/calendar reviews and recurring information digests. Do not create or change a cron job until schedule, timezone, sources and delivery target are confirmed.
+Use for morning/evening summaries, weekly planning, inbox/calendar reviews and recurring information digests. Create native Hermes cron when the owner's wording or an established plan clearly specifies the schedule and purpose; ask only for genuinely missing information that changes the result.
 
 ## Brief Definition
 
@@ -31,7 +31,7 @@ Resolve:
 - handling of empty data and partial source failures;
 - whether the briefing should be continuable in the main session.
 
-Show this definition and obtain confirmation before creating the job.
+When the request already determines these fields, proceed and report the created schedule. Otherwise ask one concise clarification about the missing choice.
 
 ## Cron Contract
 
@@ -43,20 +43,21 @@ A briefing must not recursively schedule jobs, send email, change calendar data 
 
 - Make repeated runs safe and avoid duplicate notifications where possible.
 - Report source failures by section; do not label the whole system unavailable when one source fails.
-- Keep output quiet when no notification is useful only if that behavior was explicitly selected.
+- Keep output quiet when there is no new actionable signal only if the user explicitly selected that policy. Internal cron health, token cost and unchanged source state are not user-facing signals.
+- Lead with decisions, conflicts and overdue commitments; keep operator metrics and tool traces out of the briefing.
 - Verify the created cron job by listing/read-back of its schedule, skills and destination.
 - For conversational daily briefs, use session attachment where supported.
 
 ## Suggested V1 Brief
 
-A morning brief may include today's Calendar agenda, urgent unread Gmail, user-confirmed reminders and weather only when a current weather source is available. It is read-only and should finish with concise priorities plus detected conflicts.
+A morning brief may include today's Calendar agenda, urgent unread Gmail, user-confirmed reminders and weather only when a current weather source is available. It is read-only, starts with what needs attention, names unavailable sources and finishes with source freshness.
 
 ## Verification Checklist
 
-- [ ] Purpose, schedule, timezone and destination confirmed
+- [ ] Purpose, schedule, timezone and destination are explicit or unambiguous
 - [ ] Sources and empty/error behavior defined
 - [ ] Prompt is self-contained and read-only
 - [ ] Minimal skills/toolsets attached
-- [ ] Job created only after confirmation
+- [ ] No unnecessary confirmation was introduced for a clearly requested schedule
 - [ ] Job listed/read back and delivery target verified
 - [ ] Repeated execution cannot create external duplicates

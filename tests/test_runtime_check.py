@@ -8,6 +8,23 @@ from scripts.runtime_check import collect_runtime, default_hermes_home, default_
 
 
 class RuntimeCheckTests(unittest.TestCase):
+    def test_accepts_supported_hermes_020_patch_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp)
+
+            def runner(command):
+                joined = " ".join(map(str, command))
+                if "--version" in joined:
+                    return 0, "Hermes Agent v0.20.3 (test)"
+                if "config check" in joined:
+                    return 0, "✓ TELEGRAM_BOT_TOKEN\n✓ TELEGRAM_ALLOWED_USERS"
+                if "gateway status" in joined:
+                    return 0, "Gateway process running (PID: 123)"
+                return 0, "doctor ok"
+
+            result = collect_runtime(hermes_home, runner)
+            self.assertTrue(result["checks"]["hermes_version"]["ok"])
+
     def test_accepts_supported_hermes_020_runtime(self):
         with tempfile.TemporaryDirectory() as tmp:
             hermes_home = Path(tmp)

@@ -21,6 +21,17 @@ SECTION_ORDER = (
 )
 SECTION_INDEX = {name: index for index, name in enumerate(SECTION_ORDER)}
 STATUSES = {"ok", "empty", "unavailable"}
+SECTION_LABELS = {
+    "calendar": "Календарь",
+    "gmail": "Почта",
+    "drive": "Файлы",
+    "docs": "Документы",
+    "sheets": "Таблицы",
+    "research": "Исследования",
+    "reminders": "Напоминания",
+    "developer": "Разработка",
+}
+MAX_SECTION_ITEMS = 3
 
 
 class BriefingValidationError(ValueError):
@@ -150,16 +161,20 @@ def _normalize_section(raw_section: object, index: int) -> dict[str, object]:
     }
 
 
-def _alerts(
+def _alert_details(
     sections: list[dict[str, object]],
     *,
     generated_at: datetime,
-) -> list[str]:
-    alerts: list[str] = []
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    alerts: list[tuple[str, str, tuple[str, ...]]] = []
     for section in sections:
         name = str(section["name"])
         if section["status"] == "unavailable":
-            alerts.append(f"source_unavailable:{name}:{section['error_code']}")
+            alerts.append((
+                f"source_unavailable:{name}:{section['error_code']}",
+                f"Не удалось проверить: {SECTION_LABELS[name]}",
+                (),
+            ))
 
         items = section["items"]
         assert isinstance(items, list)
@@ -172,29 +187,61 @@ def _alerts(
                     if right_start >= left_end:
                         break
                     pair = sorted((str(left["handle"]), str(right["handle"])))
-                    alerts.append(f"calendar_conflict:{pair[0]}:{pair[1]}")
+                    alerts.append((
+                        f"calendar_conflict:{pair[0]}:{pair[1]}",
+                        f"Конфликт в календаре: {left['title']} ↔ {right['title']} [{pair[0]}, {pair[1]}]",
+                        tuple(pair),
+                    ))
         elif name == "reminders":
             for item in items:
                 if item.get("done", False) or "due" not in item:
                     continue
                 if _aware_timestamp(item["due"], "due") < generated_at:
-                    alerts.append(f"overdue_reminder:{item['handle']}")
-    return sorted(set(alerts))
+                    handle = str(item["handle"])
+                    alerts.append((
+                        f"overdue_reminder:{handle}",
+                        f"Просрочено: {item['title']} [{handle}]",
+                        (handle,),
+                    ))
+    return sorted(set(alerts), key=lambda item: item[0])
 
 
-def _render_markdown(result: Mapping[str, object]) -> str:
-    lines = ["# Daily brief", "", f"Status: {result['status']}"]
+def _item_line(item: Mapping[str, object], timezone: ZoneInfo) -> str:
+    title = str(item["title"]).replace("\r", " ").replace("\n", " ")
+    timestamp = next((item.get(field) for field in ("start", "due", "timestamp", "published_at") if item.get(field)), None)
+    clock = _aware_timestamp(timestamp, "item timestamp").astimezone(timezone).strftime("%H:%M — ") if timestamp else ""
+    return f"- {clock}{title} [{item['handle']}]"
+
+
+def _render_markdown(
+    result: Mapping[str, object],
+    alert_details: list[tuple[str, str, tuple[str, ...]]],
+) -> str:
+    lines = ["# Сегодня"]
+    attention_handles = {handle for _, _, handles in alert_details for handle in handles}
+    if alert_details:
+        lines.extend(("", "## Требует внимания"))
+        lines.extend(f"- {text}" for _, text, _ in alert_details)
+
+    rendered_sections = []
     for section in result["sections"]:
-        lines.extend(("", f"## {str(section['name']).title()} — {section['status']}"))
-        items = section["items"]
-        if not items:
-            lines.append("- No items")
-        for item in items:
-            title = str(item["title"]).replace("\r", " ").replace("\n", " ")
-            lines.append(f"- {title} [{item['handle']}]")
-    if result["alerts"]:
-        lines.extend(("", "## Alerts"))
-        lines.extend(f"- {alert}" for alert in result["alerts"])
+        items = [item for item in section["items"] if str(item["handle"]) not in attention_handles]
+        if items:
+            rendered_sections.append((section, items))
+
+    if rendered_sections:
+        lines.extend(("", "## Остальное" if alert_details else "## Дальше"))
+        timezone = ZoneInfo(str(result["timezone"]))
+        for section, items in rendered_sections:
+            lines.extend(("", f"### {SECTION_LABELS[str(section['name'])]}"))
+            lines.extend(_item_line(item, timezone) for item in items[:MAX_SECTION_ITEMS])
+            if len(items) > MAX_SECTION_ITEMS:
+                lines.append(f"- Ещё: {len(items) - MAX_SECTION_ITEMS}")
+    elif not alert_details:
+        lines.extend(("", "На сегодня ничего не требует внимания."))
+
+    generated_at = _aware_timestamp(result["generated_at"], "generated_at")
+    lines.extend(("", f"Проверено: {generated_at:%H:%M} · {result['timezone']}"))
     return "\n".join(lines)
 
 
@@ -231,12 +278,13 @@ def compose_daily_brief(snapshot: Mapping[str, object]) -> dict[str, object]:
     else:
         status = "ok"
 
+    alert_details = _alert_details(sections, generated_at=generated_at)
     result: dict[str, object] = {
         "generated_at": generated_at.isoformat(),
         "timezone": timezone_name,
         "status": status,
         "sections": sections,
-        "alerts": _alerts(sections, generated_at=generated_at),
+        "alerts": [alert[0] for alert in alert_details],
     }
-    result["markdown"] = _render_markdown(result)
+    result["markdown"] = _render_markdown(result, alert_details)
     return result
