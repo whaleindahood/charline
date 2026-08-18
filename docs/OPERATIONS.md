@@ -14,7 +14,13 @@ On Windows, back up the existing Gateway launcher, stop the Gateway, then copy
 base interpreter from `.venv\pyvenv.cfg` and retries only immediate startup
 failures; the Startup shortcut remains the single owner.
 
-Hermes integration changes are stored in `patches/hermes-agent/charline.patch`, pinned to `BASE_COMMIT`. A fresh install must pass `git apply --check` before applying it. An already-patched checkout must pass `git apply --reverse --check`. After upgrading Hermes, rebase and retest the patch; never force-apply it to a different base commit.
+Hermes integration changes are stored as the ordered pair
+`patches/hermes-agent/charline.patch` then
+`patches/hermes-agent/windows-calendar.patch`, pinned to `BASE_COMMIT`. A fresh
+install must pass `git apply --check` before applying each patch in that order.
+An already-patched checkout must pass `git apply --reverse --check` in reverse
+order. After upgrading Hermes, rebase and retest both patches; never force-apply
+them to a different base commit.
 
 Skill sync is exception-safe: a caught activation failure restores the prior managed skill set. It is not crash-atomic; process or machine termination during activation can require rollback from the backup.
 

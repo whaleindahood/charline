@@ -87,6 +87,12 @@ class DomainSkillPolicyTests(unittest.TestCase):
         ):
             self.assertIn(phrase, text)
 
+    def test_calendar_avoids_fragile_windows_shell_preludes(self):
+        text = self.read_skill("charline-calendar")
+        self.assertIn("do not invoke `date`", text)
+        self.assertIn("plain `python` command", text)
+        self.assertIn("do not repeat the authentication check", text)
+
     def test_orchestration_defines_native_parallel_task_contract(self):
         text = self.read_skill("charline-orchestration")
         for phrase in (

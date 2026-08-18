@@ -80,6 +80,17 @@ def test_hermes_patch_is_pinned_and_carries_runtime_tests():
     assert "gateway/slash_commands.py" not in patch
 
 
+def test_windows_calendar_patch_bypasses_fragile_shell_bootstrap():
+    patch_root = ROOT / "patches" / "hermes-agent"
+    patch = (patch_root / "windows-calendar.patch").read_text(encoding="utf-8")
+    operations = (ROOT / "docs" / "OPERATIONS.md").read_text(encoding="utf-8")
+    assert "_windows_direct_python_argv" in patch
+    assert "_validated_runtime_venv" in patch
+    assert "_kill_probe_process_tree" in patch
+    assert "test_execute_bypasses_bash_snapshot" in patch
+    assert operations.index("charline.patch") < operations.index("windows-calendar.patch")
+
+
 def test_phase_two_ui_keeps_old_stateful_core_menus_deleted():
     patch = (ROOT / "patches" / "hermes-agent" / "charline.patch").read_text(encoding="utf-8")
     plugin = (ROOT / "plugins" / "charline" / "__init__.py").read_text(encoding="utf-8")

@@ -1,0 +1,319 @@
+diff --git a/tests/tools/test_find_shell.py b/tests/tools/test_find_shell.py
+index e84fdef0c..aea37dbe7 100644
+--- a/tests/tools/test_find_shell.py
++++ b/tests/tools/test_find_shell.py
+@@ -145,15 +145,52 @@ class TestGitBashExternalProgramProbe:
+         local_mod._bash_probe_details_cache.clear()
+         calls = []
+ 
+-        def fake_run(argv, **kwargs):
++        class FakeProcess:
++            pid = 42
++            returncode = 0
++
++            def communicate(self, timeout=None):
++                return "", ""
++
++        def fake_popen(argv, **kwargs):
+             calls.append((argv, kwargs))
+-            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
++            return FakeProcess()
+ 
+-        monkeypatch.setattr(local_mod.subprocess, "run", fake_run)
++        monkeypatch.setattr(local_mod.subprocess, "Popen", fake_popen)
+ 
+         assert local_mod._bash_starts(r"C:\Git\bin\bash.exe") is True
+         assert calls[0][0][-1] == "/usr/bin/true; /usr/bin/cat --version >/dev/null"
+ 
++    def test_probe_timeout_kills_the_process_tree(self, monkeypatch):
++        """A wedged MSYS child must not retain the probe pipe forever."""
++        import tools.environments.local as local_mod
++
++        local_mod._bash_starts_cache.clear()
++        local_mod._bash_probe_details_cache.clear()
++        killed = []
++
++        class WedgedProcess:
++            pid = 42
++            returncode = None
++
++            def communicate(self, timeout=None):
++                if timeout == 15:
++                    raise subprocess.TimeoutExpired("bash", timeout)
++                return "", ""
++
++        monkeypatch.setattr(local_mod.subprocess, "Popen", lambda *a, **kw: WedgedProcess())
++
++        monkeypatch.setattr(
++            local_mod,
++            "_kill_probe_process_tree",
++            lambda pid: killed.append(pid),
++            raising=False,
++        )
++
++        assert local_mod._bash_starts(r"C:\Git\bin\bash.exe") is False
++        assert killed
++        assert "timed out" in local_mod._bash_probe_details_cache[r"C:\Git\bin\bash.exe"].lower()
++
+     @pytest.mark.windows_only
+     def test_aslr_failure_surfaces_targeted_windows_command(
+         self, tmp_path, monkeypatch
+diff --git a/tests/tools/test_local_env_windows_msys.py b/tests/tools/test_local_env_windows_msys.py
+index 79a3edff0..2eb6a9e10 100644
+--- a/tests/tools/test_local_env_windows_msys.py
++++ b/tests/tools/test_local_env_windows_msys.py
+@@ -30,6 +30,8 @@ host ``_IS_WINDOWS`` is already False, so no patching is needed at all.
+ """
+ 
+ import os
++import sys
++from pathlib import Path
+ from unittest.mock import patch
+ 
+ import pytest
+@@ -43,6 +44,7 @@ from tools.environments.local import (
+     _make_run_env,
+     _msys_to_windows_path,
+     _prepend_git_bash_dirs,
++    _windows_direct_python_argv,
+     _quote_bash_path,
+     _resolve_safe_cwd,
+     _sanitize_subprocess_env,
+@@ -51,6 +54,54 @@ from tools.environments.local import (
+ )
+ 
+ 
++@pytest.mark.windows_only
++class TestWindowsDirectPython:
++    def test_parses_plain_python_without_shell(self):
++        argv = _windows_direct_python_argv(
++            'python "C:/Users/Legion/google_api.py" calendar list --start 2026-08-19T00:00:00+03:00'
++        )
++
++        assert argv == [
++            sys.executable,
++            "C:/Users/Legion/google_api.py",
++            "calendar",
++            "list",
++            "--start",
++            "2026-08-19T00:00:00+03:00",
++        ]
++
++    def test_rejects_shell_syntax(self):
++        assert _windows_direct_python_argv("TZ=Europe/Moscow date") is None
++        assert _windows_direct_python_argv("python script.py | more") is None
++
++    def test_uses_validated_gateway_runtime_venv(self, monkeypatch):
++        runtime_venv = Path(r"C:\Hermes\venv")
++        monkeypatch.setattr(local_mod, "_in_venv", False)
++        monkeypatch.setattr(
++            "tools.environments.local._validated_runtime_venv",
++            lambda env: runtime_venv,
++        )
++
++        argv = _windows_direct_python_argv(
++            "python google_api.py calendar list",
++            {"VIRTUAL_ENV": str(runtime_venv)},
++        )
++
++        assert argv[0] == str(runtime_venv / "Scripts" / "python.exe")
++
++    def test_execute_bypasses_bash_snapshot(self, tmp_path):
++        script = tmp_path / "probe.py"
++        script.write_text("print('native-python-ok')\n", encoding="utf-8")
++
++        with patch.object(LocalEnvironment, "init_session", autospec=True) as init:
++            env = LocalEnvironment(cwd=str(tmp_path), timeout=10)
++            result = env.execute(f'python "{script.as_posix()}"', timeout=10)
++
++        init.assert_not_called()
++        assert result["returncode"] == 0
++        assert result["output"].strip() == "native-python-ok"
++
++
+ # ---------------------------------------------------------------------------
+ # _msys_to_windows_path — pure-function unit tests
+ # ---------------------------------------------------------------------------
+diff --git a/tools/environments/local.py b/tools/environments/local.py
+index 8b7a479c5..10014d570 100644
+--- a/tools/environments/local.py
++++ b/tools/environments/local.py
+@@ -5,6 +5,7 @@ import ntpath
+ import os
+ import platform
+ import re
++import shlex
+ import shutil
+ import signal
+ import subprocess
+@@ -133,11 +134,35 @@ def _bash_safe_path(path: str) -> str:
+ 
+ def _quote_bash_path(path: str) -> str:
+     """Quote *path* for safe interpolation into a Git Bash script on Windows."""
+-    import shlex
+-
+     return shlex.quote(_bash_safe_path(path))
+ 
+ 
++def _windows_direct_python_argv(
++    command: str, env: dict | None = None
++) -> list[str] | None:
++    """Return argv for a shell-free Python command on native Windows."""
++    if not _IS_WINDOWS or not command or re.search(r"[;&|<>\r\n]", command):
++        return None
++    try:
++        argv = shlex.split(command, posix=True)
++    except ValueError:
++        return None
++    if not argv:
++        return None
++
++    executable = ntpath.basename(argv[0]).lower()
++    if not re.fullmatch(r"(?:python(?:3(?:\.\d+)?)?|py)(?:\.exe)?", executable):
++        return None
++    if not ntpath.dirname(argv[0]):
++        runtime_venv = _validated_runtime_venv(env or {}) if not _in_venv else None
++        argv[0] = str(
++            runtime_venv / "Scripts" / "python.exe"
++            if runtime_venv is not None
++            else sys.executable
++        )
++    return argv
++
++
+ def _cwd_usable(path: str) -> bool:
+     """True when *path* is a directory this process can actually chdir into.
+ 
+@@ -923,17 +948,37 @@ def _bash_starts(bash: str) -> bool:
+         return cached
+ 
+     try:
+-        result = subprocess.run(
++        proc = subprocess.Popen(
+             [bash, "--noprofile", "--norc", "-c", _BASH_EXTERNAL_PROGRAM_PROBE],
+-            capture_output=True,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
+             text=True, encoding="utf-8", errors="replace",
+-            timeout=15,
+             creationflags=windows_hide_flags() if _IS_WINDOWS else 0,
+         )
+-        ok = result.returncode == 0
++        try:
++            stdout, stderr = proc.communicate(timeout=15)
++        except subprocess.TimeoutExpired:
++            _kill_probe_process_tree(proc.pid)
++            try:
++                stdout, stderr = proc.communicate(timeout=2)
++            except subprocess.TimeoutExpired:
++                stdout, stderr = "", ""
++                for stream in (proc.stdout, proc.stderr):
++                    try:
++                        stream.close()
++                    except Exception:
++                        pass
++            _bash_probe_details_cache[bash] = "Git Bash external-program probe timed out"
++            logger.debug("bash probe timed out for %s", bash)
++            ok = False
++        else:
++            ok = proc.returncode == 0
+         if not ok:
+-            combined = f"{result.stdout or ''}{result.stderr or ''}"
+-            _bash_probe_details_cache[bash] = combined.strip()[:2000]
++            combined = f"{stdout or ''}{stderr or ''}".strip()
++            if combined:
++                _bash_probe_details_cache[bash] = combined[:2000]
++            elif bash not in _bash_probe_details_cache:
++                _bash_probe_details_cache[bash] = f"exit code {proc.returncode}"
+             logger.debug("bash probe failed for %s: %s", bash, combined.strip()[:200])
+     except Exception as exc:
+         _bash_probe_details_cache[bash] = str(exc)[:2000]
+@@ -944,6 +989,26 @@ def _bash_starts(bash: str) -> bool:
+     return ok
+ 
+ 
++def _kill_probe_process_tree(pid: int) -> None:
++    """Best-effort tree kill without spawning another fragile Windows command."""
++    try:
++        import psutil
++
++        parent = psutil.Process(pid)
++        processes = [*parent.children(recursive=True), parent]
++        for process in reversed(processes):
++            try:
++                process.kill()
++            except (psutil.NoSuchProcess, psutil.AccessDenied):
++                pass
++        psutil.wait_procs(processes, timeout=2)
++    except Exception:
++        try:
++            os.kill(pid, signal.SIGTERM)
++        except (OSError, ProcessLookupError):
++            pass
++
++
+ _git_bash_bin_dirs_cache: "list[str] | None" = None
+ 
+ 
+@@ -1718,8 +1783,61 @@ class LocalEnvironment(BaseEnvironment):
+     def __init__(self, cwd: str = "", timeout: int = 60, env: dict = None):
+         cwd = _resolve_local_initial_cwd(cwd)
+         super().__init__(cwd=cwd, timeout=timeout, env=env)
++        self._session_init_attempted = False
++        if not _IS_WINDOWS:
++            self._ensure_session()
++
++    def _ensure_session(self) -> None:
++        if self._session_init_attempted:
++            return
++        self._session_init_attempted = True
+         self.init_session()
+ 
++    def execute(
++        self,
++        command: str,
++        cwd: str = "",
++        *,
++        timeout: int | None = None,
++        stdin_data: str | None = None,
++        rewrite_compound_background: bool = True,
++        bounded_capture: bool = False,
++    ) -> dict:
++        argv = _windows_direct_python_argv(command, self.env)
++        if argv is None:
++            self._ensure_session()
++            return super().execute(
++                command,
++                cwd,
++                timeout=timeout,
++                stdin_data=stdin_data,
++                rewrite_compound_background=rewrite_compound_background,
++                bounded_capture=bounded_capture,
++            )
++
++        self._before_execute()
++        effective_cwd = _resolve_safe_cwd(cwd or self.cwd)
++        proc = subprocess.Popen(
++            argv,
++            text=True,
++            env=_make_run_env(self.env),
++            encoding="utf-8",
++            errors="replace",
++            stdout=subprocess.PIPE,
++            stderr=subprocess.STDOUT,
++            stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
++            start_new_session=True,
++            cwd=effective_cwd,
++            creationflags=windows_hide_flags(),
++        )
++        if stdin_data is not None:
++            _pipe_stdin(proc, stdin_data)
++        return self._wait_for_process(
++            proc,
++            timeout=timeout or self.timeout,
++            bounded_capture=bounded_capture,
++        )
++
+     def get_temp_dir(self) -> str:
+         """Return a shell-safe writable temp dir for local execution.
+ 
