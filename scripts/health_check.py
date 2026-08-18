@@ -18,6 +18,10 @@ from scripts.sync_skills import default_hermes_home, is_managed_skill_name
 Runner = Callable[[Sequence[str]], tuple[int, str]]
 WINDOWS_LAUNCH_FAILURE_CODES = {3221225477, -1073741819}
 DIAGNOSTIC_LAUNCH_ATTEMPTS = 3
+TEXT_FILE_SUFFIXES = {
+    ".json", ".md", ".py", ".ps1", ".sh", ".toml", ".txt",
+    ".vbs", ".yaml", ".yml",
+}
 
 
 def _is_transient_windows_launch_failure(completed: subprocess.CompletedProcess[str]) -> bool:
@@ -69,7 +73,10 @@ def _tree_manifest(root: Path) -> dict[str, str]:
         if path.is_symlink():
             manifest[relative.as_posix()] = f"link:{os.readlink(path)}"
         elif path.is_file():
-            manifest[relative.as_posix()] = sha256(path.read_bytes()).hexdigest()
+            payload = path.read_bytes()
+            if path.suffix.lower() in TEXT_FILE_SUFFIXES:
+                payload = payload.replace(b"\r\n", b"\n")
+            manifest[relative.as_posix()] = sha256(payload).hexdigest()
     return manifest
 
 

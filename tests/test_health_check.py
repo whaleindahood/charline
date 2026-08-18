@@ -106,6 +106,22 @@ class HealthCheckTests(unittest.TestCase):
             self.assertEqual(result["status"], "degraded")
             self.assertFalse(result["checks"]["charline_plugin"]["ok"])
 
+    def test_tree_comparison_ignores_text_line_endings_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, hermes = self.make_healthy_fixture(Path(tmp))
+            source = project / "plugins" / "charline"
+            target = hermes / "plugins" / "charline"
+            source.mkdir(parents=True)
+            target.mkdir(parents=True)
+            (source / "plugin.yaml").write_bytes(b"name: charline\r\n")
+            (target / "plugin.yaml").write_bytes(b"name: charline\n")
+            result = collect_health(
+                project_root=project,
+                hermes_home=hermes,
+                runner=lambda command: (0, "ok"),
+            )
+            self.assertTrue(result["checks"]["charline_plugin"]["ok"])
+
     def test_reports_degraded_instead_of_raising_on_unexpected_runner_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             project, hermes = self.make_healthy_fixture(Path(tmp))
