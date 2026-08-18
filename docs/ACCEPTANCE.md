@@ -19,6 +19,9 @@ Required results:
 - every external-write eval requires the latest exact preview, explicit confirmation and read-back;
 - unknown write outcomes cannot be blindly retried;
 - usage output contains aggregate counters only, never message content.
+- architecture checks find no Charline session router, project database, scheduler or second Gateway;
+- the Charline plugin registers the five daily views, `/charline`, `/projects` and its model tool without overriding upstream `/topic`;
+- the Hermes patch contains only generic, capability-gated extension points required by the plugin.
 
 ## Active-profile gate
 
@@ -55,19 +58,24 @@ Do not use Drive share/delete as a V1 proof until the installed interface expose
 
 ## Conversational UX gates
 
-The persistent Telegram command picker must show only the ten daily Charline entry points. The complete technical Hermes catalog must remain available through the paginated `/commands` card.
+The persistent Telegram command picker must show exactly `/today`, `/projects`, `/tasks`, `/schedules` and `/settings`. The complete technical Hermes catalog remains manually available through `/commands`.
 
 Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 
-1. Confirm Telegram's persistent menu button opens the native command list rather than a Web App, and `/charline` opens one native card with `Календарь`, `Почта`, `Файлы`, `Задачи`, `Проекты`, `Новая задача` and `Новый проект`; category details and `Назад` edit that card, while task/project buttons reuse their existing scoped centers.
+1. Confirm the picker has exactly five daily entries. Main `/charline` must show a compact status card; project `/charline` must show exact-topic status. Neither Home card contains Calendar, Mail, Files, Research, Memory, New Task, New Project or all-Hermes launchers.
 2. Send a natural-language meeting request without duration; receive one short duration question, then no progress chatter and one complete preview; cancel without a write.
 3. Repeat the request by Russian voice; verify the transcript and cancel at the final confirmation.
 4. Request a busy slot; receive one conflict message with the nearest available start as an exact alternative preview.
 5. Change one field after preview; verify the old confirmation is invalid and a new preview is required.
 6. Separately confirm one sandbox Calendar creation; receive one concise result after exact read-back.
-7. In the ordinary direct-message chat, start two independent bounded tasks in parallel; continue the conversation, inspect only current-chat work through `/agents` with no Gateway service jobs shown, and verify each completion is labelled and separately verified.
-8. Opt into `/topic` separately; send two messages from All Messages and verify Telegram creates two isolated topic sessions; verify `/projects new [name]` and `Новый проект` also create named isolated topics.
-9. Ask one unrelated general question and verify Charline answers normally without forcing a menu or domain transaction.
+7. In the ordinary direct-message chat, start two independent bounded tasks in parallel; continue the conversation, inspect only current-chat work through `/tasks` with no Gateway service jobs shown, and verify each completion is labelled and separately verified. `/agents` remains a manually reachable upstream diagnostic.
+8. In root DM Main, send ordinary text, create A with `/projects new A`, use A, return to Main, create/use B and return to Main. Verify three stable, isolated Hermes sessions and no last-project redirect.
+9. Verify `Новый проект` and the natural-language project tool use the same service and require an exact explicit creation step.
+10. Restart the Gateway; verify native project metadata survives and stale/deleted topic state never redirects Main or another project.
+11. From Main and A, create separate background work and test reminders; verify every completion returns to its exact origin.
+12. Ask one unrelated general question in Main and verify Charline answers normally without forcing a menu or domain transaction.
+13. Render Projects, Tasks, Schedules and Settings, restart Gateway, then use their read-only buttons; each card must reconstruct and edit in place. A pre-restart mutation confirmation must expire safely.
+14. Verify stop-all, cron deletion and memory deletion require owner/chat/thread-bound confirmation and read-back.
 
 ## Release decision
 

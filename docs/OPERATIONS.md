@@ -5,7 +5,8 @@
 1. Back up the active Hermes profile through the supported Hermes backup command.
 2. Run the repository tests.
 3. Run `python scripts/sync_skills.py --dry-run` with explicit Hermes home and backup directory; review its exact create/replace list, obtain confirmation, then rerun without `--dry-run`.
-4. Do not run two sync processes against the same profile.
+4. Install the repository subdirectory plugin with an immutable commit pin (`hermes plugins install <owner>/<repo>/plugins/charline --ref <40-char-sha>`), enable it, and explicitly grant `gateway.platform_actions`.
+5. Do not run two sync/install processes against the same profile.
 
 On Windows, back up the existing Gateway launcher, stop the Gateway, then copy
 `scripts/Hermes_Gateway.vbs` to
@@ -33,14 +34,28 @@ If Google reports `invalid_grant` or a revoked token, use the installed Google W
 2. Restore the complete `productivity/charline` and `productivity/charline-*` set with `python scripts/restore_skills.py <backup-dir> --hermes-home <path>` after confirming the exact target.
 3. Run the repository tests and health check.
 4. Start one Gateway and verify Telegram plus a read-only Google request.
+5. If rolling back the Main/project migration, follow `MIGRATION.md`; never delete old topic sessions automatically.
 
 ## Daily runtime
 
 - Telegram uses the existing Hermes Gateway and active `default` profile.
 - For quiet Russian Telegram UX, set `display.language: ru`; set `display.platforms.telegram.tool_progress`, `interim_assistant_messages` and `busy_ack_detail` to `off`/`false`. Keep `long_running_notifications` enabled when one editable heartbeat is useful for long/background work; disable it only for strictly final-only delivery.
 - Keep `platforms.telegram.extra.rich_messages: true` for native Rich Message tables. The current pilot also uses `rich_drafts: true`; if a client leaves stale draft frames, set it to `false` and restart the Gateway. `/tasks` uses an editable native control card independently of rich drafts.
-- Set `platforms.telegram.extra.command_menu.style: charline` to replace the crowded Telegram command picker with ten daily sections. This affects presentation only; every Hermes command remains dispatchable and browsable through `/commands`.
-- Keep topic mode opt-in. After activation, All Messages starts a new Telegram topic/session automatically; `/projects new [name]` and `Новый проект` create named projects. `/projects` is the compact overview. Do not use Kanban unless shared durable worker state is required.
+- Configure the conversation-first picker without disabling commands:
+
+  ```yaml
+  platforms:
+    telegram:
+      extra:
+        command_menu:
+          max_commands: 5
+          visible: [today, projects, tasks, schedules, settings]
+          rewrites:
+            tasks: charline_tasks
+  ```
+
+  `/commands` and `/agents` remain manually dispatchable. The rewrite affects only the no-argument Telegram `/tasks` entry.
+- Keep `ignore_root_dm: false`: root DM is permanent Main. Charline projects use configured native Private Chat Topics in `platforms.telegram.extra.dm_topics`; do not enable or depend on upstream `/topic` for project routing. `/projects` is the read-only overview. Do not use Kanban unless shared durable worker state is required.
 - Do not start a second process with the same Telegram bot token.
 - Use Hermes Desktop/Dashboard for session, cron, skill and process inspection.
 

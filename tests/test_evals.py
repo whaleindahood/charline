@@ -105,6 +105,35 @@ class EvaluationContractTests(unittest.TestCase):
             ],
         )
 
+    def test_main_and_native_project_topology_is_covered(self):
+        by_id = {item["id"]: item for item in self.scenarios}
+        self.assertIn("conversation.main-project-main-isolation", by_id)
+        self.assertIn("projects.create-native-confirmed", by_id)
+        self.assertIn("delivery.origin-main-and-project", by_id)
+        self.assertIn(
+            "no_last_project_redirect",
+            by_id["conversation.main-project-main-isolation"]["required_trace"],
+        )
+
+    def test_conversation_first_restart_safe_ui_is_covered(self):
+        by_id = {item["id"]: item for item in self.scenarios}
+        required = {
+            "ui.conversation-first-daily-menu",
+            "ui.main-project-contextual-home",
+            "ui.restart-safe-read-navigation",
+            "ui.read-only-project-summary",
+        }
+        self.assertTrue(required.issubset(by_id))
+        trace = set(by_id["ui.restart-safe-read-navigation"]["required_trace"])
+        self.assertEqual(
+            trace,
+            {"reconstructed_from_native_state", "owner_chat_thread_authorized", "edit_in_place"},
+        )
+        self.assertIn(
+            "no_synthetic_project_message",
+            by_id["ui.read-only-project-summary"]["required_trace"],
+        )
+
     def test_security_policy_defines_external_content_trust_boundary(self):
         policy_paths = [
             ROOT / "docs" / "SECURITY.md",

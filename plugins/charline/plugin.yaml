@@ -1,0 +1,11 @@
+name: charline
+version: 1.1.0
+description: "Conversation-first Telegram Main/project UX for Charline."
+author: Charline
+capabilities:
+  - gateway.platform_actions
+hooks:
+  - pre_gateway_dispatch
+  - gateway_platform_event
+provides_tools:
+  - charline_projects

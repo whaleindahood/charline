@@ -16,7 +16,7 @@ V1 includes phases 0–5 below. A phase is code-complete only when its determini
 | 3. Research | Complete | Browser provider available; optional structured web provider is not configured |
 | 4. Briefing/reminders | Complete | Confirmed cron create/read-back/run, user-observed delivery and separately confirmed cleanup passed |
 | 5. Developer/usage | Complete | Deployment remains separately confirmed |
-| 6. Native conversational UX | Implementation complete | Native daily panel, topic-first conversations, project cards, task aggregation, schedules and Memory controls implemented; tests, activation and final live proof remain |
+| 6. Native conversational UX | Main/native-project refactor and conversation-first daily UI in repository | Plugin UI and native topic projects implemented; profile migration and fresh live proof remain |
 
 ## Phase 0 — Foundation
 
@@ -50,9 +50,9 @@ Exit criteria: RED–GREEN–REFACTOR workflow; architecture guard against a sec
 
 Goal: make the existing Hermes chat the complete assistant interface. Natural language and voice must reach the same domain skills without a second router, session system or Mini App.
 
-Exit criteria: `/charline` is visible in the Telegram menu; ordinary text and Russian voice scheduling request only missing blocking details, then silently check availability in one initial Calendar read before one confirmation preview; conflicts return the nearest available alternative; changed drafts invalidate prior confirmation; confirmed writes are read back; All Messages starts independent topic sessions natively; `/topic` and `/background` demonstrate independent work without blocking it; `/projects new [name]` and `Новый проект` create named topic projects; `/projects` lists them; `/tasks` (`/agents`) edits one current-chat task card in place with refresh, `needs input`, recent results and scoped stop controls while hiding Gateway service jobs; compact Markdown tables use Telegram Rich Messages; Workspace confirmation uses once-only native terminal approval for the exact `google_api.py` write command; natural-language cancellation and `/stop` provide scoped task controls; the live checks in `ACCEPTANCE.md` pass and receive new evidence.
+Exit criteria: the daily picker is Today/Projects/Tasks/Schedules/Settings; Main and project `/charline` cards are contextual; ordinary read navigation is restart-safe and edits in place; mutation confirmations remain ephemeral; root DM remains permanent Main; native project topics retain isolated Hermes sessions; `/projects new <name>`, its UI action and the model-facing tool share one service; `/topic` is not required; background and cron completions return to their exact origin; `/projects` and summaries are read-only native-state views; Task Center hides fast foreground answers and Gateway jobs; confirmed writes retain exact preview and read-back.
 
-Implemented daily surfaces: `Сегодня` aggregates current Google reads, all owned active work, pending decisions and upcoming schedules; `Проекты` provides scoped summary/task buttons; `Память` lists the existing Hermes store and uses two-step deletion; `Расписания` manages the existing cron engine. No duplicate state store was added.
+Daily surfaces remain thin views over Hermes and Google state. Project cards use deterministic metadata only; they never add administrative summary prompts to a project transcript. No duplicate state store was added.
 
 ## Post-V1, opt-in only
 

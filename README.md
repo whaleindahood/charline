@@ -1,6 +1,6 @@
 # Charline
 
-Charline is a Hermes-native general personal assistant configuration, not a second agent framework or only a calendar bot.
+Charline is a Hermes-native personal assistant product layer, not a second agent framework or only a calendar bot.
 
 ## Current status
 
@@ -10,8 +10,10 @@ Repository completion and deployment to the active profile remain separate, revi
 
 ## Product contract
 
-- One existing Telegram bot and one primary conversational chat.
+- One existing Telegram bot and one permanent Main conversation in the root DM.
 - Hermes Agent owns the model loop, Telegram Gateway, sessions, memory, skills, cron and delegation.
+- Projects are native Telegram Private Chat Topics. Their `chat_id + thread_id` routes through ordinary Hermes sessions; Charline has no project/session database or last-project router.
+- Background tasks are bounded Hermes delegation inside Main or a project. They do not create projects and return to their originating conversation.
 - Google Workspace, research, reminders, documents and developer workflows are domain capabilities loaded on demand.
 - Reads may run directly. External writes require an exact preview and explicit confirmation, followed by read-back verification.
 - Mini Apps are excluded from V1 and may return only as optional visual clients.
@@ -20,6 +22,7 @@ Repository completion and deployment to the active profile remain separate, revi
 
 - `docs/` — architecture, security and operating procedures.
 - `skills/` — version-controlled Charline policy and domain skills.
+- `plugins/charline/` — contextual `/charline`, `/today`, `/projects`, `/tasks`, `/schedules`, `/settings` views and the model-callable project tool.
 - `src/charline/` — deterministic helpers only; no agent runtime.
 - `evals/` — product-level regression scenarios.
 - `scripts/` — reproducible install, health and backup operations.
@@ -36,3 +39,7 @@ python scripts/run_evals.py
 ```
 
 The active Hermes profile remains the current `default` profile. This repository is the source of truth for Charline-owned artifacts; secrets and Hermes runtime state never belong here.
+
+Charline projects require Telegram Threaded Mode and Hermes `dm_topics`; they do not require or automatically enable the separate upstream `/topic` multi-session mode. Keep `ignore_root_dm: false` so Main remains conversational. See [`docs/MIGRATION.md`](docs/MIGRATION.md) for the explicit live-profile migration.
+
+The daily Telegram picker contains only Today, Projects, Tasks, Schedules and Settings. Calendar, mail, files, research and memory writes remain available through ordinary text or voice; `/commands` remains the manually callable power-user catalog.

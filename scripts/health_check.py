@@ -132,6 +132,17 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
         "hermes_version": {"ok": version_code == 0, "detail": version_output.splitlines()[0] if version_output else "no output"},
         "hermes_config": {"ok": config_code == 0, "detail": "valid" if config_code == 0 else config_output[-500:]},
     }
+    plugin_source = project_root / "plugins" / "charline"
+    if plugin_source.is_dir():
+        plugin_target = hermes_home / "plugins" / "charline"
+        checks["charline_plugin"] = {
+            "ok": plugin_target.is_dir()
+            and _tree_manifest(plugin_source) == _tree_manifest(plugin_target),
+            "detail": {
+                "source": str(plugin_source),
+                "target": str(plugin_target),
+            },
+        }
     status = "consistent" if all(check["ok"] for check in checks.values()) else "degraded"
     return {
         "status": status,

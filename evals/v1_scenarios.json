@@ -145,5 +145,54 @@
     "expected": ["Interpret text as cancellation intent", "List current-session work", "Ask which task to stop", "Offer active tasks and stop-all choice", "Do not cancel before selection"],
     "external_write": "none",
     "required_trace": ["cancellation_intent", "owned_work_list", "stop_scope_clarification", "no_unselected_cancellation"]
+  },
+  {
+    "id": "conversation.main-project-main-isolation",
+    "request": "Поговори со мной в основном чате, создай проект A, затем вернись сюда, используй проект B и снова продолжи основной разговор",
+    "expected": ["Keep root DM as permanent Main", "Use native thread session A", "Preserve Main context", "Use distinct native thread session B", "Never redirect root to latest project"],
+    "external_write": "none",
+    "required_trace": ["root_main_session", "native_project_a_session", "root_main_session_restored", "native_project_b_session", "no_last_project_redirect"]
+  },
+  {
+    "id": "projects.create-native-confirmed",
+    "request": "Создай проект Charline",
+    "expected": ["Normalize the name", "Show exact topic preview", "Wait for explicit confirmation", "Create through Hermes native topic action once", "Read back dm_topics metadata"],
+    "external_write": "confirm",
+    "required_trace": ["native_topic_preview", "native_platform_action", "native_metadata_read_back"]
+  },
+  {
+    "id": "delivery.origin-main-and-project",
+    "request": "Запусти фоновую задачу и напоминание сначала здесь, затем отдельно в проекте A",
+    "expected": ["Do not create a project for background work", "Return Main completions to Main", "Return project completions to project A", "Use Hermes delegation and cron only"],
+    "external_write": "none",
+    "required_trace": ["main_origin_captured", "project_origin_captured", "background_origin_delivery", "cron_origin_delivery"]
+  },
+  {
+    "id": "ui.conversation-first-daily-menu",
+    "request": "Открой основное меню Charline",
+    "expected": ["Show five daily navigation entries", "Keep capabilities conversational", "Keep commands manually reachable"],
+    "external_write": "none",
+    "required_trace": ["curated_daily_menu", "conversation_first", "technical_commands_preserved"]
+  },
+  {
+    "id": "ui.main-project-contextual-home",
+    "request": "Покажи Charline сначала в Main, затем внутри проекта A",
+    "expected": ["Render compact Main status", "Render exact project status", "Preserve native project scope"],
+    "external_write": "none",
+    "required_trace": ["main_contextual_card", "project_contextual_card", "native_project_scope"]
+  },
+  {
+    "id": "ui.restart-safe-read-navigation",
+    "request": "После перезапуска открой старую карточку проектов и расписаний",
+    "expected": ["Reconstruct from native state", "Reauthorize owner chat and thread", "Edit the existing card"],
+    "external_write": "none",
+    "required_trace": ["reconstructed_from_native_state", "owner_chat_thread_authorized", "edit_in_place"]
+  },
+  {
+    "id": "ui.read-only-project-summary",
+    "request": "Покажи сводку проекта A, не добавляя сообщений в его разговор",
+    "expected": ["Read native project metadata", "Do not dispatch a synthetic prompt", "Do not mutate project history"],
+    "external_write": "none",
+    "required_trace": ["native_project_metadata_read", "no_synthetic_project_message", "project_history_unchanged"]
   }
 ]

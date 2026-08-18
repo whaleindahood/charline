@@ -92,6 +92,20 @@ class HealthCheckTests(unittest.TestCase):
                 ["charline-stale"],
             )
 
+    def test_reports_degraded_when_repository_plugin_is_not_installed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, hermes = self.make_healthy_fixture(Path(tmp))
+            plugin = project / "plugins" / "charline"
+            plugin.mkdir(parents=True)
+            (plugin / "plugin.yaml").write_text("name: charline", encoding="utf-8")
+            result = collect_health(
+                project_root=project,
+                hermes_home=hermes,
+                runner=lambda command: (0, "ok"),
+            )
+            self.assertEqual(result["status"], "degraded")
+            self.assertFalse(result["checks"]["charline_plugin"]["ok"])
+
     def test_reports_degraded_instead_of_raising_on_unexpected_runner_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             project, hermes = self.make_healthy_fixture(Path(tmp))

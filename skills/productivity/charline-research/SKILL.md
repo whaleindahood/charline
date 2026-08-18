@@ -30,7 +30,7 @@ Use for comparisons, ecosystem reconnaissance, product/technical research, liter
 6. Distinguish confirmed facts, reasonable inference and unresolved uncertainty.
 7. Synthesize around the user's decision rather than dumping search results.
 
-Telegram `/charline` offers two entry points. `Быстрый поиск` uses the normal direct shape for one bounded question. `Глубокое` first returns an editable plan with scope, source classes and independent workstreams; begin long or parallel execution only after the user accepts or adjusts that plan. Run independent work in the background so General or the project topic remains responsive, expose progress through `/tasks`, and return the cited report to the originating session.
+Infer the research shape from the user's ordinary request; do not require a global Quick/Deep mode selector. For a large or ambiguous study, first return an editable plan with scope, source classes and independent workstreams, then begin long or parallel execution after the user accepts or adjusts it. Run independent work in the background so Main or the project topic remains responsive, expose meaningful progress through `/tasks`, and return the cited report to the originating session.
 
 For Hermes itself, official docs and the official repository outrank community README files. For fast-changing facts, note retrieval date.
 

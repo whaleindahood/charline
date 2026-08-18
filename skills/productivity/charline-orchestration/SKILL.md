@@ -57,13 +57,15 @@ Telegram remains one assistant interface. Ordinary direct-message conversation s
 
 - `/background <task>` starts a separate process-local task and returns immediately;
 - `/goal` owns one persistent outcome in the current chat and supports status, pause, resume and clear;
-- `/topic` is opt-in for separate Telegram topic sessions; do not enable topic mode automatically; after opt-in, sending from Telegram's All Messages creates a new topic and independent Hermes session; use one Telegram topic per independent project;
-- `/projects new [name]` and the `Новый проект` button remain shortcuts for named projects, while ordinary new conversations may start natively from All Messages;
-- `/projects` lists owned Telegram topic projects, marks the current project and shows each project's active-work count without exposing session IDs;
-- `/agents` and `/tasks` open the current-chat task center and show current-chat work only; it edits one Telegram message in place, shows friendly labels, `needs input`, active states and recent results, and keeps unrelated sessions and Gateway service jobs hidden;
-- `/stop` opens the active-work menu with one Stop button per task and a Stop All button.
+- the Telegram root DM is permanent Main and always remains an ordinary conversational Hermes session;
+- each Charline project is a native Telegram Private Chat Topic whose `chat_id + thread_id` produces its own normal Hermes session; never recover a root message into the latest project;
+- `/topic` is a separate advanced upstream feature; Charline does not require, enable or override it and does not use its bindings as project state;
+- `/projects new <name>`, `Проекты → Новый проект` and the model-facing project tool share one deterministic service over Hermes `dm_topics` metadata;
+- `/projects` is a read-only view of native project metadata and never injects administrative summary messages into project transcripts;
+- `/tasks` opens Charline's current-chat task center and shows current-chat work only; it edits one Telegram message in place, shows friendly labels, `needs input`, active states and recent results, and keeps unrelated sessions and Gateway service jobs hidden. `/agents` remains a manually reachable upstream technical diagnostic;
+- individual task stop controls act only on exact current-session work; `Остановить всё` requires a separate owner/chat/thread-bound confirmation.
 
-Before topic opt-in, keep the ordinary direct-message assistant unchanged. After opt-in, the root is a command lobby and each Telegram topic is an independent conversation. Inside a topic, conversation history, `/goal`, `/background`, `/tasks` and cancellation remain scoped to that session. A background result returns to its originating session and exact topic. Each session compacts independently. Use Kanban only when several workers share dependencies and task state must survive a Gateway or worker restart; conversation topics alone are not a reason to enable it.
+Main and every project topic keep separate conversation history, `/goal`, `/background`, `/tasks` and cancellation; each session compacts independently. A background result and a cron reminder return to their originating Main/topic route. Project creation never creates a worker; background work never creates a project. Use Kanban only when several workers share dependencies and task state must survive a Gateway or worker restart; conversation topics alone are not a reason to enable it.
 
 ## Cancellation
 
@@ -83,10 +85,10 @@ Use `delegate_task` for bounded work, cron for recurring work and Kanban only fo
 
 ## Memory and State
 
-- Hermes memory: compact stable preferences, identity and environment facts.
-- Session history: prior conversations and outcomes, retrieved with `session_search`.
+- Hermes memory: compact stable preferences, identity, environment conventions and durable cross-project facts only.
+- Session history: Main/project conversations and outcomes, retrieved read-only with `session_search` when needed.
 - External systems: authoritative service data.
-- Task state: temporary progress and drafts; never store it as durable user memory.
+- Project/task state: keep transient progress, TODOs, raw summaries and temporary paths in the project session or authoritative artifacts, never routine durable user memory.
 
 Save corrected stable preferences proactively. Turn repeated verified procedures into reviewed skills. Do not perform uncontrolled self-modification.
 

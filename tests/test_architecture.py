@@ -26,6 +26,25 @@ def test_v1_contains_no_second_runtime_or_mini_app_tree():
     assert present == set()
 
 
+def test_charline_plugin_does_not_implement_session_or_routing_state():
+    plugin_root = ROOT / "plugins" / "charline"
+    combined = "\n".join(
+        path.read_text(encoding="utf-8").lower()
+        for path in plugin_root.glob("*.py")
+    )
+    for forbidden in (
+        "sqlite3",
+        "session database",
+        "last_project",
+        "active_project",
+        "create_task(",
+        "apscheduler",
+        "telegram.bot(",
+    ):
+        assert forbidden not in combined
+    assert 'register_command(\n        name="topic"' not in combined
+
+
 def test_fresh_development_sync_installs_pytest():
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     dev_dependencies = config.get("dependency-groups", {}).get("dev", [])
@@ -47,5 +66,22 @@ def test_hermes_patch_is_pinned_and_carries_runtime_tests():
     base = (patch_root / "BASE_COMMIT").read_text(encoding="utf-8").strip()
     patch = (patch_root / "charline.patch").read_text(encoding="utf-8")
     assert len(base) == 40
-    assert "gateway/slash_commands.py" in patch
-    assert "tests/tools/test_workspace_write_approval.py" in patch
+    assert "hermes_cli/platform_actions.py" in patch
+    assert "ensure_private_topic" in patch
+    assert "tests/hermes_cli/test_platform_actions.py" in patch
+    assert "send_card" in patch
+    assert "plugin_callback" in patch
+    assert "command_menu" in patch
+    assert "interrupt_delegation" in patch
+    assert "gateway/slash_commands.py" not in patch
+
+
+def test_phase_two_ui_keeps_old_stateful_core_menus_deleted():
+    patch = (ROOT / "patches" / "hermes-agent" / "charline.patch").read_text(encoding="utf-8")
+    plugin = (ROOT / "plugins" / "charline" / "__init__.py").read_text(encoding="utf-8")
+    for obsolete in (
+        "send_charline_menu", "_charline_menu_state", "_automation_menu_state",
+        "project_summary_event", "last_project", "active_project",
+    ):
+        assert obsolete not in patch
+        assert obsolete not in plugin
