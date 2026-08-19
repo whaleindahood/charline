@@ -10,6 +10,8 @@ from typing import Any, Callable, Mapping, Optional
 
 from .projects import ProjectNameError, ProjectService
 from .ui import CharlineUi
+from .calendar import CalendarFastPath, _default_now, _default_timezone
+from .today import TodayService
 
 
 @dataclass(frozen=True)
@@ -36,11 +38,23 @@ class CharlinePlugin:
         ctx: Any,
         config_loader: Callable[[], Mapping[str, Any]] = _default_config_loader,
         data: Any = None,
-        session_key_builder: Callable[[Any], str] | None = None,
+        today_service: Any = None,
     ):
         self.actions = ctx.platform_actions
+        self._ctx = ctx
         self.projects = ProjectService(ctx.platform_actions, config_loader)
-        self.ui = CharlineUi(self.projects, data, session_key_builder)
+        self.ui = CharlineUi(self.projects, data)
+        self.today = today_service or TodayService(
+            self.projects,
+            self.ui.data,
+            now=_default_now,
+            timezone_loader=_default_timezone,
+        )
+        self.calendar = (
+            CalendarFastPath(ctx)
+            if all(hasattr(ctx, name) for name in ("llm", "state", "spawn_task"))
+            else None
+        )
 
     def capture_request(self, event: Any, gateway: Any, session_store: Any = None, **_: Any) -> None:
         """Capture immutable routing context; never rewrite or route a message."""
@@ -103,7 +117,6 @@ class CharlinePlugin:
                     "started": True,
                     "name": created.name,
                     "thread_id": created.thread_id,
-                    "request_id": created.request_id,
                 },
                 ensure_ascii=False,
             )
@@ -148,30 +161,13 @@ class CharlinePlugin:
         if (raw_args or "").strip():
             return "Использование: /today"
         source = self._telegram_source(self.current_request())
-        result = await self.actions.dispatch_agent_turn(
-            platform="telegram",
-            chat_id=str(source.chat_id),
-            prompt=(
-                "Собери мою актуальную сводку на сегодня. Проверь календарь, личные задачи, "
-                "напоминания и важные результаты проектов. Сначала покажи то, что требует "
-                "внимания; явно назови недоступные источники и время проверки."
-            ),
-            owner_user_id=str(source.user_id or ""),
-            thread_id=str(source.thread_id or ""),
-        )
-        return None if result.get("ok") else "Не удалось собрать сводку. Попробуйте ещё раз."
+        return await self._send_card(await self.today.card(source), source)
 
     async def tasks_command(self, raw_args: str) -> None | str:
         if (raw_args or "").strip():
             return "Использование: /tasks"
         source = self._telegram_source(self.current_request())
         return await self._send_card(self.ui.personal_tasks(source), source)
-
-    async def schedules_command(self, raw_args: str) -> None | str:
-        if (raw_args or "").strip():
-            return "Использование: /schedules"
-        source = self._telegram_source(self.current_request())
-        return await self._send_card(self.ui.schedules(source), source)
 
     async def settings_command(self, raw_args: str) -> None | str:
         if (raw_args or "").strip():
@@ -219,13 +215,51 @@ class CharlinePlugin:
         payload = payload or {}
         if platform != "telegram" or event_type != "plugin_callback" or payload.get("plugin") != "charline":
             return None
+        if self.calendar is not None:
+            calendar_card = self.calendar.callback(str(payload.get("action") or ""), payload)
+            if calendar_card is not None:
+                return {"plugin": "charline", "card": calendar_card}
+        if str(payload.get("action") or "") == "today":
+            if hasattr(self._ctx, "spawn_task"):
+                self._ctx.spawn_task(
+                    self._update_today_card(payload), name="charline:today"
+                )
+            return {
+                "plugin": "charline",
+                "card": {"text": "Собираю актуальную сводку…", "buttons": []},
+            }
         card = self.ui_callback(str(payload.get("action") or ""), payload)
         return {"plugin": "charline", "card": card}
+
+    async def _update_today_card(self, payload: Mapping[str, Any]) -> None:
+        source = self._callback_source(payload)
+        card = await self.today.card(source)
+        await self.actions.update_card(
+            platform="telegram",
+            chat_id=str(payload.get("chat_id") or ""),
+            message_id=str(payload.get("message_id") or ""),
+            text=str(card["text"]),
+            buttons=list(card.get("buttons") or []),
+            thread_id=str(payload.get("thread_id") or ""),
+            owner_user_id=str(payload.get("user_id") or ""),
+        )
+
+    def fast_action(self, event: Any, **kwargs: Any) -> dict[str, str] | None:
+        if self.calendar is None:
+            return None
+        return self.calendar.intercept(event, **kwargs)
 
 
 def register(ctx: Any) -> None:
     plugin = CharlinePlugin(ctx)
+    ctx.register_auxiliary_task(
+        "calendar_parse",
+        display_name="Charline Calendar parser",
+        description="Structured parsing for exact Calendar event creation.",
+        defaults={"max_tokens": 350, "timeout": 20},
+    )
     ctx.register_hook("pre_gateway_dispatch", plugin.capture_request)
+    ctx.register_hook("post_auth_pre_agent_dispatch", plugin.fast_action)
     ctx.register_hook("gateway_platform_event", plugin.platform_event)
     ctx.register_command(
         name="charline",
@@ -247,11 +281,6 @@ def register(ctx: Any) -> None:
         name="charline-tasks",
         handler=plugin.tasks_command,
         description="Задачи",
-    )
-    ctx.register_command(
-        name="schedules",
-        handler=plugin.schedules_command,
-        description="Расписания",
     )
     ctx.register_command(
         name="settings",

@@ -1,12 +1,12 @@
 # Charline Hermes plugin
 
-This standalone plugin adds `/charline`, model-backed `/today`, `/projects`, personal `/tasks`, `/schedules`, `/settings` and `charline_projects` through Hermes extension points. It does not own polling, routing, sessions, memory, cron, Kanban or workers.
+This standalone plugin adds `/charline`, `/today`, `/projects`, personal `/tasks`, `/settings`, `charline_projects` and a narrow exact-event Calendar Fast Path through Hermes extension points. It does not own polling, routing, sessions, memory, cron, Kanban or workers.
 
-The Charline UI is private-chat only. Personal tasks are exact `Задача: ` entries in native Hermes Memory; they are not delegations or processes. Cards use short deterministic references, while personal-task completion, schedule mutation and memory deletion show an owner/chat/thread-bound confirmation before the write.
+The Charline UI is private-chat only. Personal tasks are exact `Задача: ` entries in native Hermes Memory; they are not delegations or processes. Raw Memory, cron, provider and process controls stay outside the daily UI. Calendar confirmations use existing durable plugin state and are bound to owner/chat/thread.
 
 Install from this repository's subdirectory at an immutable commit, enable `charline`, and explicitly grant `gateway.platform_actions`. Telegram Threaded Mode must be enabled and `platforms.telegram.extra.ignore_root_dm` must remain false.
 
-`/projects new <name>` explicitly creates/reuses an empty native topic. For a substantial natural-language request, the model calls `charline_projects(start)` with the complete request; Hermes creates/reuses the topic and begins a normal agent turn there immediately. An unknown topic-creation outcome is never retried automatically and requires Telegram/`dm_topics` reconciliation.
+`/projects new <name>` explicitly creates/reuses an empty native topic. For a substantial natural-language request, the model calls `charline_projects(start)` with the complete request; Charline composes generic `ensure_private_topic` and `dispatch_agent_turn` actions. Hermes remains unaware of project-product semantics and owns the resulting topic session.
 
 `/projects` reads `platforms.telegram.extra.dm_topics`; it owns no project database and does not write to project transcripts.
 

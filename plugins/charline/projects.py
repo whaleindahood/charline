@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any, Callable, Mapping
 
 
@@ -22,7 +21,18 @@ class NativeProject:
 class ProjectCreation:
     name: str
     thread_id: str
-    request_id: str = ""
+
+
+def build_project_handoff(name: str, original_request: str) -> str:
+    """Build Charline's product handoff without teaching Hermes about projects."""
+    return (
+        f"Continue the owner's request in the native Telegram project topic “{name}”.\n\n"
+        f"Original request:\n{original_request}\n\n"
+        "Treat this message as the beginning of the project conversation. Ask only "
+        "clarifications that are genuinely required, then plan and continue through a "
+        "verified result. Use normal Hermes capabilities and choose direct work, "
+        "delegation, background execution or durable Kanban according to the work itself."
+    )
 
 
 def normalize_project_name(value: str) -> str:
@@ -86,26 +96,29 @@ class ProjectService:
         task = str(task or "").strip()
         if not task:
             raise ValueError("Укажите исходную задачу проекта.")
-        request_id = "charline-" + sha256(
-            f"{chat_id}\0{name}\0{task}".encode("utf-8")
-        ).hexdigest()[:16]
-        result = await self._actions.start_private_topic_task(
-            "telegram",
-            str(chat_id),
-            name,
-            task,
-            owner_user_id=str(user_id),
-            request_id=request_id,
+        ensured = await self._actions.ensure_private_topic(
+            "telegram", str(chat_id), name
         )
-        return self._verified_creation(chat_id, name, result, request_id=request_id)
+        created = self._verified_creation(chat_id, name, ensured)
+        dispatched = await self._actions.dispatch_agent_turn(
+            platform="telegram",
+            chat_id=str(chat_id),
+            thread_id=created.thread_id,
+            owner_user_id=str(user_id),
+            prompt=build_project_handoff(name, task),
+        )
+        if not dispatched.get("ok"):
+            detail = dispatched.get("detail") or dispatched.get("error") or "unknown error"
+            raise RuntimeError(
+                f"Проект создан, но работу в его теме запустить не удалось: {detail}"
+            )
+        return created
 
     def _verified_creation(
         self,
         chat_id: str,
         name: str,
         result: Mapping[str, Any],
-        *,
-        request_id: str = "",
     ) -> ProjectCreation:
         if not result.get("ok") or not result.get("thread_id"):
             detail = result.get("detail") or result.get("error") or "unknown error"
@@ -125,4 +138,4 @@ class ProjectService:
                 "Проект мог быть создан, но read-back dm_topics не подтвердил результат; "
                 "не повторяйте запись до ручной проверки."
             )
-        return ProjectCreation(name=name, thread_id=thread_id, request_id=request_id)
+        return ProjectCreation(name=name, thread_id=thread_id)

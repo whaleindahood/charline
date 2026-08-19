@@ -6,6 +6,7 @@ capabilities:
   - gateway.platform_actions
 provides_hooks:
   - pre_gateway_dispatch
+  - post_auth_pre_agent_dispatch
   - gateway_platform_event
 provides_tools:
   - charline_projects
