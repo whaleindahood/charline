@@ -5,7 +5,7 @@ The composer accepts one JSON object:
 ```json
 {
   "generated_at": "2026-08-07T09:00:00+03:00",
-  "timezone": "Europe/Moscow",
+  "timezone": "<IANA timezone from runtime/profile>",
   "sections": [
     {
       "name": "calendar",

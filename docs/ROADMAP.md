@@ -50,7 +50,7 @@ Exit criteria: RED–GREEN–REFACTOR workflow; architecture guard against a sec
 
 Goal: make the existing Hermes chat the complete assistant interface. Natural language and voice must reach the same domain skills without a second router, session system or Mini App.
 
-Exit criteria: the picker is Today/Projects/Tasks/Schedules/Settings; `/today` starts a model-backed live brief; `/tasks` contains personal owner tasks rather than agent processes; root DM remains permanent Main; a substantial natural request creates/reuses a native project topic and begins there without requiring the user to repeat it; durable project work uses native Kanban and returns status/results to the exact topic; `/topic` is not required; external writes retain exact preview and read-back.
+Exit criteria: the picker is Today/Projects/Tasks/Settings; `/today` reads live state deterministically with at most one synthesis call; `/tasks` contains personal owner tasks rather than agent processes; root DM remains permanent Main; a substantial natural request creates/reuses a native project topic and begins there without requiring the user to repeat it; durable project work uses native Kanban and returns status/results to the exact topic; `/topic` is not required; external writes retain exact preview and verification. Cron and Memory remain conversational Hermes capabilities rather than Charline administration panels.
 
 Daily surfaces remain thin views over Hermes and Google state. Project cards use deterministic metadata only; they never add administrative summary prompts to a project transcript. No duplicate state store was added.
 

@@ -24,7 +24,7 @@ The normative product definition is [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 - `docs/` — architecture, security and operating procedures.
 - `skills/` — version-controlled Charline policy and domain skills.
-- `plugins/charline/` — contextual `/charline`, `/today`, `/projects`, `/tasks`, `/schedules`, `/settings` views and the model-callable project tool.
+- `plugins/charline/` — the minimal `/charline`, `/today`, `/projects`, `/tasks`, `/settings` product UI, project composition and bounded fast actions.
 - `src/charline/` — deterministic helpers only; no agent runtime.
 - `evals/` — product-level regression scenarios.
 - `scripts/` — reproducible install, health and backup operations.
@@ -44,4 +44,4 @@ The active Hermes profile remains the current `default` profile. This repository
 
 Charline projects require Telegram Threaded Mode and Hermes `dm_topics`; they do not require or automatically enable the separate upstream `/topic` multi-session mode. Keep `ignore_root_dm: false` so Main remains conversational. See [`docs/MIGRATION.md`](docs/MIGRATION.md) for the explicit live-profile migration.
 
-The Telegram picker contains Today, Projects, personal Tasks, Schedules and Settings. Calendar, mail, files, research and developer work remain available through ordinary text or voice; `/commands` remains the manually callable power-user catalog.
+The Telegram picker contains Today, Projects, personal Tasks and Settings. Cron remains a native Hermes capability managed primarily through ordinary text or voice; useful upcoming reminders may appear in Today. `/commands` remains the manually callable power-user catalog.

@@ -11,8 +11,9 @@ The daily menu is a set of state views, not a capability launcher:
 - `Сегодня` — calendar, personal tasks, reminders, plans and important project results;
 - `Проекты` — durable project topics and their state;
 - `Задачи` — the owner's personal tasks, not Hermes processes;
-- `Расписания` — native Hermes cron jobs;
-- `Настройки` — connected accounts, models/providers, memory, access, timezone and notifications.
+- `Настройки` — timezone, access/security settings and product preferences useful to the owner.
+
+Cron is a conversational Hermes capability, not a Charline administration panel. The owner can ask for reminders, briefings or recurring work in natural language; useful upcoming scheduled items may appear in `Сегодня`. Raw Memory records, process IDs, delegation plumbing, providers and internal storage controls are not daily product views.
 
 ## Projects
 
@@ -36,7 +37,7 @@ A topic is a conversation/workstream, not a repository. Several topics may use t
 - Kanban is for durable multi-stage or multi-worker work that must survive restarts, retain handoffs or wait for the owner.
 - Cron is used for reminders, briefings, scheduled project work and proactive checks. It may be created by the model when clearly implied by the owner's request or established plan.
 - Results and blockers return to the exact originating Main/topic route.
-- Charline adds product policy, native topic creation and deterministic state cards; it does not duplicate Hermes infrastructure.
+- Charline adds product policy, composes native topic creation from generic Hermes primitives, renders deterministic state cards and implements a few bounded fast actions; it does not duplicate Hermes infrastructure.
 
 ## Access model
 

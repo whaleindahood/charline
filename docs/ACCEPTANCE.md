@@ -20,7 +20,7 @@ Required results:
 - unknown write outcomes cannot be blindly retried;
 - usage output contains aggregate counters only, never message content.
 - architecture checks find no Charline session router, project database, scheduler or second Gateway;
-- the Charline plugin registers the five owner-facing daily commands, `/charline`, `/projects` and its model tool without overriding upstream `/topic`;
+- the Charline plugin registers the four owner-facing daily commands, `/charline`, `/projects` and its model tool without overriding upstream `/topic`;
 - the Hermes patch contains only generic, capability-gated extension points required by the plugin.
 
 ## Active-profile gate
@@ -58,11 +58,11 @@ Do not use Drive share/delete as a V1 proof until the installed interface expose
 
 ## Conversational UX gates
 
-The persistent Telegram command picker must show exactly `/today`, `/projects`, `/tasks`, `/schedules` and `/settings`. The complete technical Hermes catalog remains manually available through `/commands`.
+The persistent Telegram command picker must show exactly `/today`, `/projects`, `/tasks` and `/settings`. The complete technical Hermes catalog remains manually available through `/commands`.
 
 Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 
-1. Confirm the picker has exactly five owner-facing entries with Russian descriptions: Today, Projects, personal Tasks, Schedules and Settings. Main `/charline` must remain conversation-first and must not expose one launcher per tool/integration.
+1. Confirm the picker has exactly four owner-facing entries with Russian descriptions: Today, Projects, personal Tasks and Settings. Main `/charline` must remain conversation-first and must not expose one launcher per tool/integration.
 2. Send a natural-language meeting request without duration; receive one short duration question, then no progress chatter and one complete preview; cancel without a write.
 3. Repeat the request by Russian voice; verify the transcript and cancel at the final confirmation.
 4. Request a busy slot; receive one conflict message with the nearest available start as an exact alternative preview.
@@ -74,9 +74,10 @@ Phase 6 requires fresh live proof; prior V1 evidence does not cover these flows:
 10. Restart the Gateway; verify native project metadata survives and stale/deleted topic state never redirects Main or another project.
 11. From Main and A, create separate background work, native Kanban work and test reminders; verify every completion returns to its exact origin and never falls back to Main when an exact topic route is unavailable.
 12. Ask one unrelated general question in Main and verify Charline answers normally without forcing a menu or domain transaction.
-13. Render Projects, personal Tasks, Schedules and Settings/Memory, restart Gateway, then use their read-only buttons; each card must reconstruct and edit in place. A pre-restart mutation confirmation must expire safely.
-14. Verify personal-task completion, every cron mutation (run, pause, resume and delete), and memory deletion require owner/chat/thread-bound exact confirmation and read-back. Verify Charline commands and callbacks cannot reveal private Memory in a group chat.
+13. Render Projects, personal Tasks and Settings, restart Gateway, then use their read-only buttons; each card must reconstruct and edit in place. Calendar pending actions must remain owner/chat/thread-bound and expire safely.
+14. Verify simple exact-time Calendar creation uses one parse call, confirmation executes once outside the active Hermes turn, double confirmation cannot duplicate the event, cancellation writes nothing, and success/failure/unknown outcomes are distinct. Verify Charline commands and callbacks cannot reveal private state in a group chat.
 15. Ask «Что важно сегодня?» with one calendar conflict, one overdue reminder, four ordinary items and one unavailable source. Verify the response leads with the conflict, overdue item and named source gap; retains source handles; shows at most three ordinary items per source plus the hidden count; ends with observation time/timezone; and contains no raw alert codes or tool traces.
+16. Verify Main maps to one stable root Hermes session, two project topics map to two stable isolated Hermes sessions, root messages never redirect to the last project and Charline does not require `/topic` mode.
 
 ## Release decision
 

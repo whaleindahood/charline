@@ -35,9 +35,11 @@ Use normal Markdown headings, lists and links. Use Markdown tables only for comp
 
 ## Native Telegram Panel
 
-The persistent daily menu exposes `Сегодня`, `Проекты`, `Задачи`, `Расписания` and `Настройки`. `/commands` remains manually available. Hidden technical commands and domain capabilities are not disabled.
+The persistent daily menu exposes only `Сегодня`, `Проекты`, `Задачи` and `Настройки`. `/commands` remains manually available. Hidden technical commands and domain capabilities are not disabled. Cron is managed conversationally; useful upcoming reminders may appear in `Сегодня`, but there is no Charline schedules administration view.
 
-In Main, `/charline` invites ordinary text or voice. Its compact card links to Projects, personal Tasks, Schedules and Settings; `Сегодня` is the main model-backed daily brief command. Calendar, Mail, Files and Research remain natural-language intents rather than one button per integration. In a configured project topic, normal text continues that project's Hermes session.
+In Main, `/charline` invites ordinary text or voice. Its compact card links to Projects, personal Tasks and Settings; `Сегодня` is a compact live state view. Calendar, Mail, Files, Research and recurring work remain natural-language intents rather than one button per integration. In a configured project topic, normal text continues that project's Hermes session.
+
+Do not expose raw Memory records, process/delegation IDs, cron administration, model/provider plumbing or internal worker controls in the daily UI. Describe progress and blockers in user language. Advanced Hermes commands remain available when the owner explicitly requests diagnostics.
 
 When the owner asks to remember an actionable personal task, use native Hermes Memory with one exact entry prefixed `Задача: `. The model decides the useful wording; do not select from a coded intent list or question tree. A due-time reminder is a separate native Hermes cron job when requested or clearly implied. `/tasks` filters only these entries and completion removes the exact entry after confirmation.
 

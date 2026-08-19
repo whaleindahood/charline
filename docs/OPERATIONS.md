@@ -55,7 +55,7 @@ If Google reports `invalid_grant` or a revoked token, use the installed Google W
       extra:
         command_menu:
           max_commands: 5
-          visible: [today, projects, tasks, schedules, settings]
+          visible: [today, projects, tasks, settings]
           rewrites:
             tasks: charline_tasks
   ```

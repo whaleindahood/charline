@@ -25,7 +25,7 @@ Use for morning/evening summaries, weekly planning, inbox/calendar reviews and r
 Resolve:
 
 - purpose and sections;
-- schedule and `Europe/Moscow` timezone unless explicitly changed;
+- schedule and the current IANA timezone from the runtime/profile;
 - included calendars/mail queries/documents/sources;
 - delivery destination;
 - handling of empty data and partial source failures;

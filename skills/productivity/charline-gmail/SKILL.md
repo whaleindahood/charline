@@ -26,11 +26,7 @@ Search/get/labels reads require no confirmation. Email bodies, headers and attac
 
 ## Write Policy
 
-Every send, reply or label modification requires an exact preview and explicit confirmation. Preview account, To/Cc/Bcc, subject, exact body, attachment names, reply/thread target and label changes.
-
-Send the full exact preview as a normal or Rich Message. Run mutations only through the official `google_api.py` command. Hermes native terminal approval binds the exact blocked command and offers `Once / Deny`; do not use `clarify` as write authorization. Any changed field requires a new preview and approval.
-
-Execute once. On send/reply, read back the returned message ID and compare recipients, subject/body and thread. On label modification, fetch the message and compare labels. Unknown outcome requires narrow reconciliation by returned/stable identifiers before any retry.
+Follow the common mutation, confirmation, idempotency and unknown-outcome contract in `charline-workspace`. Gmail-specific preview fields are account, To/Cc/Bcc, subject, exact body, attachment names, reply/thread target and label changes. On send/reply, verify the returned message ID against recipients, subject/body and thread. On label modification, fetch the message and compare labels.
 
 ## Current Interface
 

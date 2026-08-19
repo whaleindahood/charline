@@ -22,7 +22,15 @@ Use for agenda questions, availability, event drafts, creation, deletion and age
 
 ## Time Contract
 
-Resolve timezone-aware start and end values, calendar, title, attendees, location, recurrence scope and notifications. Use the confirmed profile timezone (`Europe/Moscow` for the current user) unless the user explicitly supplies another timezone. Clarify genuinely ambiguous dates or start times.
+Resolve timezone-aware start and end values, calendar, title, attendees, location, recurrence scope and notifications. Use the current IANA timezone from the runtime/profile unless the user explicitly supplies another timezone. Never infer current time from an old session timestamp. Clarify genuinely ambiguous dates or start times.
+
+## Simple exact event creation
+
+When the owner already supplies an event title, exact or relative date/time, and duration/end, prefer the Charline Calendar Fast Path. It uses one bounded structured parse call, resolves relative time deterministically from fresh runtime time, shows an exact confirmation, and performs the confirmed Google write directly outside the active Hermes turn. It does not scan availability, run conflict planning, or repeat model/tool loops. If the fast path declines or required details are missing, continue through normal Hermes.
+
+## Scheduling and availability
+
+Requests to find a free window, compare alternatives, schedule around other events, or resolve genuine ambiguity use this richer workflow. Only this workflow needs availability reads, conflict detection, alternatives and a recheck immediately before a confirmed mutation.
 
 For current-day availability, begin no earlier than the actual current time in calendar timezone. Past days have no free slots. Apply configured work windows and buffers, merge busy intervals, and offer at most three ranked options unless more are requested.
 
@@ -38,7 +46,7 @@ After blocking details are known, use one Calendar read covering the requested i
 
 If the slot conflicts, send one message that names the conflict and presents the nearest available start as a complete alternative preview. Offer `Create nearest / Other times / Cancel`; choosing Create nearest explicitly confirms that exact alternative. Return at most three alternatives only when the user asks for other times.
 
-Send the full exact preview as a normal or Rich Message. Run create/delete only through the official `google_api.py` command. Hermes native terminal approval binds the exact blocked command and offers `Once / Deny`; do not use `clarify` as write authorization. A changed field requires a new preview and approval. A voice-originated request still requires an unambiguous final approval; an uncertain transcript alone never authorizes a write.
+For the richer scheduling workflow, follow the common `charline-workspace` transaction contract and run create/delete through the official `google_api.py` command. The exact-event Fast Path uses its own Telegram confirmation card and then calls that same official implementation directly, without terminal or another model turn. A changed field requires a new preview and approval. A voice-originated request still requires an unambiguous final approval; an uncertain transcript alone never authorizes a write.
 
 ## Read Operations
 
@@ -78,6 +86,6 @@ Unknown write outcome requires narrow read-by-ID/search before retry. Conflict a
 - [ ] Source calendar data read
 - [ ] Conflicts and buffers checked
 - [ ] Latest exact draft confirmed for writes
-- [ ] Conflict rechecked immediately before write
+- [ ] Conflict rechecked immediately before a scheduling/availability write
 - [ ] One idempotent call executed
 - [ ] Event read back and critical fields compared

@@ -18,16 +18,20 @@ class DomainSkillPolicyTests(unittest.TestCase):
             ROOT / "skills" / "productivity" / name / "SKILL.md"
         ).read_text(encoding="utf-8").lower()
 
-    def test_google_domain_skills_define_confirmation_and_read_back(self):
+    def test_workspace_owns_common_transaction_policy_once(self):
+        common = self.read_skill("charline-workspace")
+        for phrase in (
+            "exact preview", "explicit confirmation", "read back",
+            "official `google_api.py`", "unknown", "never blindly",
+        ):
+            self.assertIn(phrase, common)
         for name in GOOGLE_WRITE_SKILLS:
             with self.subTest(skill=name):
                 text = self.read_skill(name)
                 self.assertIn("exact preview", text)
-                self.assertIn("explicit confirmation", text)
                 self.assertIn("read back", text)
                 self.assertIn("untrusted data", text)
-                self.assertIn("native terminal approval", text)
-                self.assertIn("once / deny", text)
+                self.assertIn("charline-workspace", text)
 
     def test_reminders_use_hermes_cron_without_second_scheduler(self):
         text = self.read_skill("charline-reminders")
@@ -63,7 +67,6 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "charline",
             "проекты",
             "задачи",
-            "расписания",
             "настройки",
             "charline_projects",
             "reconstructed from callback chat/thread",
@@ -72,6 +75,8 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "stale web app button",
         ):
             self.assertIn(phrase, text)
+        self.assertIn("no charline schedules administration view", text)
+        self.assertIn("do not expose raw memory records", text)
 
     def test_calendar_defines_quiet_fast_booking_flow(self):
         text = self.read_skill("charline-calendar")
@@ -83,7 +88,8 @@ class DomainSkillPolicyTests(unittest.TestCase):
             "nearest available start",
             "one compact confirmation message",
             "one concise verified result",
-            "once / deny",
+            "calendar fast path",
+            "without terminal or another model turn",
         ):
             self.assertIn(phrase, text)
 
