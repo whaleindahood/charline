@@ -3,17 +3,17 @@
 This patch carries generic Hermes extension improvements needed by the standalone Charline plugin:
 
 - capability-gated `ctx.platform_actions.ensure_private_topic`, delegating creation and persistence to the existing Telegram adapter;
-- owner/thread scoping for the existing generic Telegram choice picker.
-- capability-gated restart-safe plugin cards over the existing post-ACL `gateway_platform_event` hook;
-- Telegram command-menu allowlists and explicit no-argument rewrites, including alias materialization;
-- scoped interruption of one native async delegation.
+- owner/thread scoping for the existing generic Telegram choice picker;
+- capability-gated restart-safe plugin cards and `update_card` over the existing post-ACL `gateway_platform_event` hook;
+- `post_auth_pre_agent_dispatch`, a generic authenticated pre-turn seam for bounded plugin fast actions;
+- Telegram command-menu allowlists and explicit no-argument rewrites, including alias materialization.
 
 `windows-calendar.patch` is the second, ordered patch. It keeps plain Python
 tool calls off Git Bash on native Windows and kills the complete MSYS probe
 tree on timeout. This prevents Google Workspace reads and writes from waiting
 for the terminal tool's outer timeout when Git for Windows cannot spawn a child.
 
-All Charline commands, project policy and project views live in `plugins/charline`; the patch contains no Charline router, command, state store or scheduler. It targets upstream commit `2c8a2b65aa148ceb178d2251c54a523af12092c9` (2026-08-17). The prior 300-KB product fork is obsolete.
+All Charline commands, Calendar policy, project handoff composition and project views live in `plugins/charline`; the patch contains no Charline router, command, state store, project semantic or scheduler. Every remaining extension can be used unchanged by an independent plugin. It targets upstream commit `2c8a2b65aa148ceb178d2251c54a523af12092c9` (2026-08-17). The prior 300-KB product fork is obsolete.
 
 Apply only to the exact commit recorded in `BASE_COMMIT`:
 

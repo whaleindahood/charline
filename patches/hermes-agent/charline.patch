@@ -1,5 +1,5 @@
 diff --git a/gateway/run.py b/gateway/run.py
-index 1439cc601..c736cbea0 100644
+index 1439cc601ab6a6526e97914a92eaaee5b2802811..6805bb9fd9a9a4085cd8e1ec115dec76fa80f4a9 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -15193,19 +15193,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
@@ -27,8 +27,54 @@ index 1439cc601..c736cbea0 100644
  
      def _make_profile_platform_event_handler(self, profile_name: str):
          """Bind platform-event auth and hook dispatch to one multiplex profile."""
+@@ -17511,6 +17512,45 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         # message arriving during any of those yields would pass the
+         # "already running" guard and spin up a duplicate agent for the
+         # same session — corrupting the transcript.
++        # Authenticated, non-command user messages may be handled by a bounded
++        # plugin fast action before Hermes claims the active session turn.
++        if not is_internal:
++            try:
++                from hermes_cli.lifecycle import invoke_hook as _invoke_hook
++
++                _hook_results = _invoke_hook(
++                    "post_auth_pre_agent_dispatch",
++                    event=event,
++                    gateway=self,
++                    session_store=getattr(self, "session_store", None),
++                )
++            except Exception as _hook_exc:
++                logger.warning(
++                    "post_auth_pre_agent_dispatch invocation failed: %s", _hook_exc
++                )
++                _hook_results = []
++
++            for _result in _hook_results:
++                if not isinstance(_result, dict):
++                    continue
++                _action = _result.get("action")
++                if _action == "skip":
++                    logger.info(
++                        "post_auth_pre_agent_dispatch skip: reason=%s platform=%s chat=%s",
++                        _result.get("reason"),
++                        source.platform.value if source.platform else "unknown",
++                        source.chat_id or "unknown",
++                    )
++                    return None
++                if _action == "rewrite":
++                    _new_text = _result.get("text")
++                    if isinstance(_new_text, str):
++                        event = dataclasses.replace(event, text=_new_text)
++                        source = event.source
++                    break
++                if _action == "allow":
++                    break
++
+         _active_session_lease, _limit_message = self._claim_active_session_slot(
+             _quick_key,
+             source,
 diff --git a/hermes_cli/commands.py b/hermes_cli/commands.py
-index 350ee7411..af55f7553 100644
+index 350ee7411c05d50592a44655770572a8d8d6ba5c..19c159d709467a4c8871a050ae8c43c6fdcdb71e 100644
 --- a/hermes_cli/commands.py
 +++ b/hermes_cli/commands.py
 @@ -769,13 +769,40 @@ def _telegram_command_menu_config() -> dict[str, Any]:
@@ -72,7 +118,7 @@ index 350ee7411..af55f7553 100644
  def telegram_menu_max_commands() -> int:
      """Return configured Telegram BotCommand menu cap with safe bounds."""
      return int(_telegram_command_menu_config()["max_commands"])
-@@ -1066,6 +1093,20 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
+@@ -1066,6 +1093,19 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
      )
      # Drop the cmd_key — Telegram only needs (name, desc) pairs.
      all_commands.extend((n, d) for n, d, _k in entries)
@@ -81,10 +127,9 @@ index 350ee7411..af55f7553 100644
 +        by_name = {name: description for name, description in all_commands}
 +        selected = []
 +        for requested in visible:
-+            target = _telegram_command_menu_config()["rewrites"].get(requested, requested)
-+            description = by_name.get(target)
++            description = by_name.get(requested)
 +            if description is None:
-+                resolved = resolve_command(target)
++                resolved = resolve_command(requested)
 +                canonical = _sanitize_telegram_name(resolved.name) if resolved else ""
 +                description = by_name.get(canonical)
 +            if description is not None:
@@ -94,24 +139,24 @@ index 350ee7411..af55f7553 100644
  
  
 diff --git a/hermes_cli/platform_actions.py b/hermes_cli/platform_actions.py
-index 52e0b68fc..90544331d 100644
+index 52e0b68fce5a9918f946de5bfa468f4d95cdbac9..db3d53563432065b9f84138027424b8326467c14 100644
 --- a/hermes_cli/platform_actions.py
 +++ b/hermes_cli/platform_actions.py
 @@ -16,8 +16,12 @@ v1 verb set
  -----------
  * ``add_reaction(platform, chat_id, message_id, emoji)``
  * ``set_thread_title(platform, chat_id, thread_id, title)``
-+* ``dispatch_agent_turn(platform, chat_id, prompt, owner_user_id, thread_id)``
 +* ``ensure_private_topic(platform, chat_id, title)``
-+* ``start_private_topic_task(platform, chat_id, title, task, owner_user_id, request_id)``
++* ``dispatch_agent_turn(platform, chat_id, prompt, owner_user_id, thread_id)``
 +* ``send_card(platform, chat_id, text, buttons, thread_id, owner_user_id)``
++* ``update_card(platform, chat_id, message_id, text, buttons, thread_id, owner_user_id)``
  
 -Both return a structured result dict — ``{"ok": True, ...}`` on success,
 +All return a structured result dict — ``{"ok": True, ...}`` on success,
  ``{"ok": False, "error": <code>, "detail": <str>}`` on failure — and never
  raise into hook dispatch. Error codes are part of the v1 contract:
  ``capability_not_granted``, ``invalid_argument``, ``gateway_unavailable``,
-@@ -205,6 +209,231 @@ class PlatformActions:
+@@ -205,6 +209,195 @@ class PlatformActions:
          self._audit("set_thread_title", platform, result)
          return result
  
@@ -180,9 +225,7 @@ index 52e0b68fc..90544331d 100644
 +        )
 +        if error is not None or adapter is None:
 +            self._audit(
-+                "dispatch_agent_turn",
-+                platform,
-+                error or _err("gateway_unavailable"),
++                "dispatch_agent_turn", platform, error or _err("gateway_unavailable")
 +            )
 +            return error or _err("gateway_unavailable")
 +        try:
@@ -209,88 +252,6 @@ index 52e0b68fc..90544331d 100644
 +        except Exception as exc:
 +            result = _err("action_failed", str(exc)[:512])
 +        self._audit("dispatch_agent_turn", platform, result)
-+        return result
-+
-+    async def start_private_topic_task(
-+        self,
-+        platform: str,
-+        chat_id: str,
-+        title: str,
-+        task: str,
-+        owner_user_id: str,
-+        request_id: str = "",
-+    ) -> Dict[str, Any]:
-+        """Create/reuse a Telegram topic and dispatch the owner's task there."""
-+        adapter, error = self._gate(
-+            platform,
-+            chat_id=chat_id,
-+            title=title,
-+            task=task,
-+            owner_user_id=owner_user_id,
-+        )
-+        if error is not None or adapter is None:
-+            self._audit(
-+                "start_private_topic_task",
-+                platform,
-+                error or _err("gateway_unavailable"),
-+            )
-+            return error or _err("gateway_unavailable")
-+        try:
-+            if getattr(adapter.platform, "value", None) != "telegram":
-+                result = _err(
-+                    "unsupported_platform_action",
-+                    f"start_private_topic_task is not implemented for {platform}",
-+                )
-+            else:
-+                thread_id = await adapter.ensure_dm_topic(
-+                    chat_id, title, force_create=False
-+                )
-+                if not thread_id:
-+                    result = _err(
-+                        "outcome_unknown",
-+                        "telegram returned no private-topic id; inspect native state before retrying",
-+                    )
-+                else:
-+                    from gateway.platforms.base import MessageEvent
-+                    from gateway.session import SessionSource
-+
-+                    project_request = str(request_id or "").strip()
-+                    prefix = (
-+                        "[This is the owner's original request moved from Main "
-+                        f"into project topic {title!r}. Project request id: "
-+                        f"{project_request or 'not-set'}. Treat the text below "
-+                        "as the user's request. Use native Hermes Kanban with "
-+                        "this request id as its idempotency key when durable "
-+                        "multi-stage work is needed.]\n\n"
-+                    )
-+                    source = SessionSource(
-+                        platform=adapter.platform,
-+                        chat_id=str(chat_id),
-+                        chat_name=str(title),
-+                        chat_type="dm",
-+                        user_id=str(owner_user_id),
-+                        user_name="Owner",
-+                        thread_id=str(thread_id),
-+                    )
-+                    await adapter.handle_message(MessageEvent(
-+                        text=prefix + str(task).strip(),
-+                        source=source,
-+                        user_id=str(owner_user_id),
-+                        user_name="Owner",
-+                        internal=True,
-+                        metadata={
-+                            "project_request_id": project_request,
-+                            "project_title": str(title),
-+                        },
-+                    ))
-+                    result = _ok(
-+                        action="start_private_topic_task",
-+                        thread_id=str(thread_id),
-+                        request_id=project_request,
-+                    )
-+        except Exception as exc:
-+            result = _err("outcome_unknown", str(exc)[:512])
-+        self._audit("start_private_topic_task", platform, result)
 +        return result
 +
 +    async def send_card(
@@ -340,11 +301,59 @@ index 52e0b68fc..90544331d 100644
 +        self._audit("send_card", platform, result)
 +        return result
 +
++    async def update_card(
++        self,
++        platform: str,
++        chat_id: str,
++        message_id: str,
++        text: str,
++        buttons: list,
++        thread_id: str = "",
++        owner_user_id: str = "",
++    ) -> Dict[str, Any]:
++        """Update an existing restart-safe plugin card by message id."""
++        adapter, error = self._gate(
++            platform,
++            chat_id=chat_id,
++            message_id=message_id,
++            text=text,
++            owner_user_id=owner_user_id,
++        )
++        if error is not None or adapter is None:
++            self._audit("update_card", platform, error or _err("gateway_unavailable"))
++            return error or _err("gateway_unavailable")
++        try:
++            updater = getattr(adapter, "update_plugin_card", None)
++            if not callable(updater):
++                result = _err(
++                    "unsupported_platform_action",
++                    f"update_card is not implemented for {platform}",
++                )
++            else:
++                updated = await updater(
++                    plugin_id=self._plugin_id,
++                    chat_id=chat_id,
++                    message_id=message_id,
++                    text=text,
++                    buttons=buttons,
++                    thread_id=thread_id,
++                    owner_user_id=owner_user_id,
++                )
++                result = (
++                    _ok(action="update_card", message_id=str(updated.message_id or message_id))
++                    if getattr(updated, "success", False)
++                    else _err("action_failed", str(getattr(updated, "error", "update failed"))[:512])
++                )
++        except Exception as exc:
++            result = _err("action_failed", str(exc)[:512])
++        self._audit("update_card", platform, result)
++        return result
++
      # -- per-platform helpers -------------------------------------------------
  
      @staticmethod
 diff --git a/hermes_cli/plugin_capabilities.py b/hermes_cli/plugin_capabilities.py
-index c474ea037..9ebe0dc16 100644
+index c474ea037d1639877a3604d9e358b373e2d5c929..0a591db4efc9c9726c608f26f07dcce0f7e6722d 100644
 --- a/hermes_cli/plugin_capabilities.py
 +++ b/hermes_cli/plugin_capabilities.py
 @@ -125,7 +125,8 @@ CAPABILITY_REGISTRY: Dict[str, CapabilitySpec] = {
@@ -352,13 +361,28 @@ index c474ea037..9ebe0dc16 100644
              description=(
                  "Act on connected chat platforms as the gateway bot "
 -                "(add reactions, rename threads) via ctx.platform_actions"
-+                "(add reactions, rename threads, dispatch agent turns, ensure private topics, send cards) via "
++                "(add reactions, rename threads, ensure private topics, send cards) via "
 +                "ctx.platform_actions"
              ),
          ),
      )
+diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
+index 9ef8e47d06901b978be25b16a2c7a2b6500f3f63..759f72ebcdd26743c566c4cd28c6b4369f6ee081 100644
+--- a/hermes_cli/plugins.py
++++ b/hermes_cli/plugins.py
+@@ -226,6 +226,10 @@ VALID_HOOKS: Set[str] = {
+     #   {"action": "allow"}  /  None             -> normal dispatch
+     # Kwargs: event: MessageEvent, gateway: GatewayRunner, session_store.
+     "pre_gateway_dispatch",
++    # Authenticated user message after commands/control gates and before the
++    # active Hermes session slot is claimed. Bounded plugin fast actions may
++    # return the same skip/rewrite/allow directive shape as pre-dispatch.
++    "post_auth_pre_agent_dispatch",
+     # Approval lifecycle hooks. Fired by tools/approval.py when a dangerous
+     # command needs an approval decision -- fires for CLI-interactive prompts,
+     # gateway/ACP approvals, and smart-mode auxiliary-LLM decisions.
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 84332a69e..cc80dd74d 100644
+index 84332a69eefeebf77aa27a4c3d73335a925cae6b..93137eba0737769bc2d928ae78220b4ade811a1c 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -6429,6 +6429,7 @@ class TelegramAdapter(BasePlatformAdapter):
@@ -369,7 +393,7 @@ index 84332a69e..cc80dd74d 100644
      ) -> SendResult:
          """Send a flat inline-keyboard choice picker (one tap → one value).
  
-@@ -6473,22 +6474,175 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6473,22 +6474,197 @@ class TelegramAdapter(BasePlatformAdapter):
                  **self._link_preview_kwargs(),
              )
  
@@ -441,6 +465,38 @@ index 84332a69e..cc80dd74d 100644
 +            )
 +            return SendResult(success=True, message_id=str(msg.message_id))
 +        except Exception as exc:
++            return SendResult(success=False, error=_redact_telegram_error_text(exc))
++
++    async def update_plugin_card(
++        self,
++        plugin_id: str,
++        chat_id: str,
++        message_id: str,
++        text: str,
++        buttons: list,
++        thread_id: str = "",
++        owner_user_id: str = "",
++    ) -> SendResult:
++        """Update a plugin-owned card without retaining an SDK message handle."""
++        del thread_id  # Telegram identifies an existing message by chat + message id.
++        if not self._bot:
++            return SendResult(success=False, error="Not connected")
++        if not re.fullmatch(r"[a-z0-9_-]{1,24}", str(plugin_id or "")):
++            return SendResult(success=False, error="Invalid plugin id")
++        try:
++            keyboard = self._plugin_card_keyboard(plugin_id, owner_user_id, buttons)
++            await self._bot.edit_message_text(
++                chat_id=normalize_telegram_chat_id(chat_id),
++                message_id=int(message_id),
++                text=self.format_message(text),
++                parse_mode=ParseMode.MARKDOWN_V2,
++                reply_markup=keyboard,
++                **self._link_preview_kwargs(),
++            )
++            return SendResult(success=True, message_id=str(message_id))
++        except Exception as exc:
++            if "not modified" in str(exc).lower():
++                return SendResult(success=True, message_id=str(message_id))
 +            return SendResult(success=False, error=_redact_telegram_error_text(exc))
 +
 +    async def _handle_plugin_card_callback(self, query, data: str) -> None:
@@ -516,22 +572,12 @@ index 84332a69e..cc80dd74d 100644
 +                parse_mode=ParseMode.MARKDOWN_V2,
 +                reply_markup=keyboard,
 +            )
-+        except Exception as exc:
-+            if "not modified" in str(exc).lower():
-+                await query.answer()
-+                return
-+            try:
-+                await query.edit_message_text(
-+                    text=str(result.get("text") or ""),
-+                    parse_mode=None,
-+                    reply_markup=keyboard,
-+                )
-+            except Exception as fallback_exc:
-+                if "not modified" in str(fallback_exc).lower():
-+                    await query.answer()
-+                    return
-+                await query.answer(text="Не удалось обновить этот раздел.")
-+                return
++        except Exception:
++            await query.edit_message_text(
++                text=str(result.get("text") or ""),
++                parse_mode=None,
++                reply_markup=keyboard,
++            )
 +        await query.answer()
 +
      async def _handle_choice_picker_callback(
@@ -547,7 +593,7 @@ index 84332a69e..cc80dd74d 100644
          if not state:
              await query.answer(text="Picker expired — run the command again.")
              return
-@@ -6496,7 +6650,6 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6496,7 +6672,6 @@ class TelegramAdapter(BasePlatformAdapter):
          # Same authorization gate as approval buttons: unauthorized users in a
          # shared group must not flip session/config state via someone else's
          # picker message.
@@ -555,7 +601,7 @@ index 84332a69e..cc80dd74d 100644
          query_chat = getattr(query_message, "chat", None)
          if not self._is_callback_user_authorized(
              str(getattr(query.from_user, "id", "")),
-@@ -6508,6 +6661,12 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6508,6 +6683,12 @@ class TelegramAdapter(BasePlatformAdapter):
              await query.answer(text="⛔ You are not authorized to change this setting.")
              return
  
@@ -568,7 +614,7 @@ index 84332a69e..cc80dd74d 100644
          try:
              idx = int(data[3:])
              choice = state["choices"][idx]
-@@ -6540,7 +6699,12 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -6540,7 +6721,12 @@ class TelegramAdapter(BasePlatformAdapter):
              except Exception:
                  pass
          await query.answer()
@@ -582,7 +628,7 @@ index 84332a69e..cc80dd74d 100644
  
      _MODEL_PAGE_SIZE = 8
  
-@@ -7031,6 +7195,11 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -7031,6 +7217,11 @@ class TelegramAdapter(BasePlatformAdapter):
                  await self._handle_model_picker_callback(query, data, chat_id)
              return
  
@@ -594,7 +640,7 @@ index 84332a69e..cc80dd74d 100644
          # --- Generic choice picker callbacks (/reasoning, /fast) ---
          if data.startswith("cp:"):
              chat_id = str(query.message.chat_id) if query.message else None
-@@ -9546,6 +9715,8 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9546,6 +9737,8 @@ class TelegramAdapter(BasePlatformAdapter):
  
          event = self._build_message_event(msg, MessageType.COMMAND, update_id=update.update_id)
          event.text = self._clean_bot_trigger_text(event.text)
@@ -605,7 +651,7 @@ index 84332a69e..cc80dd74d 100644
          # Telegram clients split messages above 4096 chars into multiple
 diff --git a/tests/gateway/test_choice_picker_scope.py b/tests/gateway/test_choice_picker_scope.py
 new file mode 100644
-index 000000000..7a71499e8
+index 0000000000000000000000000000000000000000..7a71499e858fbdadb39efef93635deb6d75f72a1
 --- /dev/null
 +++ b/tests/gateway/test_choice_picker_scope.py
 @@ -0,0 +1,54 @@
@@ -665,10 +711,10 @@ index 000000000..7a71499e8
 +    assert TelegramAdapter._choice_picker_key("123", "77") == "123:77"
 diff --git a/tests/gateway/test_plugin_action_card.py b/tests/gateway/test_plugin_action_card.py
 new file mode 100644
-index 000000000..f6f2fc4a3
+index 0000000000000000000000000000000000000000..9cb1cd15c6df92b06f1253509ac456a56c2dd546
 --- /dev/null
 +++ b/tests/gateway/test_plugin_action_card.py
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,73 @@
 +from types import SimpleNamespace
 +from unittest.mock import AsyncMock, MagicMock
 +
@@ -677,7 +723,7 @@ index 000000000..f6f2fc4a3
 +from plugins.platforms.telegram.adapter import TelegramAdapter
 +
 +
-+def _query(data="pl:charline:42:projects", user_id="42", thread_id=77):
++def _query(data="pl:example:42:projects", user_id="42", thread_id=77):
 +    query = MagicMock()
 +    query.data = data
 +    query.from_user = SimpleNamespace(id=user_id, first_name="User")
@@ -698,7 +744,7 @@ index 000000000..f6f2fc4a3
 +    adapter.format_message = lambda text: text
 +    adapter.build_source = lambda **kwargs: SimpleNamespace(**kwargs)
 +    adapter._platform_event_handler = AsyncMock(return_value=[{
-+        "plugin": "charline",
++        "plugin": "example",
 +        "card": {
 +            "text": "Проекты",
 +            "buttons": [[{"label": "Назад", "action": "home"}]],
@@ -723,20 +769,6 @@ index 000000000..f6f2fc4a3
 +
 +
 +@pytest.mark.asyncio
-+async def test_plugin_card_treats_unchanged_refresh_as_success():
-+    adapter = _adapter()
-+    query = _query()
-+    query.edit_message_text = AsyncMock(
-+        side_effect=RuntimeError("Message is not modified")
-+    )
-+
-+    await adapter._handle_plugin_card_callback(query, query.data)
-+
-+    query.edit_message_text.assert_awaited_once()
-+    query.answer.assert_awaited_once_with()
-+
-+
-+@pytest.mark.asyncio
 +async def test_plugin_card_rejects_another_authorized_user():
 +    adapter = _adapter()
 +    query = _query(user_id="99")
@@ -756,8 +788,42 @@ index 000000000..f6f2fc4a3
 +    await adapter._handle_plugin_card_callback(query, query.data)
 +
 +    query.answer.assert_awaited_once_with(text="Не удалось открыть этот раздел.")
+diff --git a/tests/gateway/test_pre_gateway_dispatch.py b/tests/gateway/test_pre_gateway_dispatch.py
+index a52194e51bff43468a32e8ac1c442c8d0209b5bb..f6a087f7b998b9476fb607683b66a6b53439f49e 100644
+--- a/tests/gateway/test_pre_gateway_dispatch.py
++++ b/tests/gateway/test_pre_gateway_dispatch.py
+@@ -118,3 +118,29 @@ async def test_hook_fires_without_session_store_attribute(monkeypatch):
+     # Hook actually fired (skip short-circuited before auth) with a None store.
+     assert seen == {"session_store": None}
+     adapter.send.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++async def test_post_auth_hook_can_handle_message_before_session_claim(monkeypatch):
++    _clear_auth_env(monkeypatch)
++    monkeypatch.setenv("WHATSAPP_ALLOWED_USERS", "*")
++    seen = []
++
++    def _fake_hook(name, **kwargs):
++        seen.append(name)
++        if name == "post_auth_pre_agent_dispatch":
++            assert kwargs["event"].text == "create event tomorrow at 14"
++            return [{"action": "skip", "reason": "fast-action"}]
++        return []
++
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", _fake_hook)
++    runner, _adapter = _make_runner(Platform.WHATSAPP)
++    runner._claim_active_session_slot = MagicMock(
++        side_effect=AssertionError("session slot must not be claimed")
++    )
++
++    result = await runner._handle_message(_make_event("create event tomorrow at 14"))
++
++    assert result is None
++    assert seen == ["pre_gateway_dispatch", "post_auth_pre_agent_dispatch"]
++    runner._claim_active_session_slot.assert_not_called()
 diff --git a/tests/hermes_cli/test_commands.py b/tests/hermes_cli/test_commands.py
-index dc0b6e9b5..62108459e 100644
+index dc0b6e9b59e58733b25a97dc5238b91bed429e1b..6e7463474029ef994d6a8f67f5eca7e0852a874e 100644
 --- a/tests/hermes_cli/test_commands.py
 +++ b/tests/hermes_cli/test_commands.py
 @@ -26,6 +26,7 @@ from hermes_cli.commands import (
@@ -768,7 +834,7 @@ index dc0b6e9b5..62108459e 100644
      telegram_menu_commands,
      telegram_menu_max_commands,
  )
-@@ -637,6 +638,38 @@ class TestDiscordSkillCmdKeyDispatch:
+@@ -637,6 +638,35 @@ class TestDiscordSkillCmdKeyDispatch:
  class TestTelegramMenuCommands:
      """Integration: telegram_menu_commands enforces the 32-char limit."""
  
@@ -780,38 +846,35 @@ index dc0b6e9b5..62108459e 100644
 +        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 +        (tmp_path / "config.yaml").write_text(
 +            "platforms:\n  telegram:\n    extra:\n      command_menu:\n"
-+            "        max_commands: 5\n        visible: [today, projects, tasks, schedules, settings]\n"
-+            "        rewrites:\n          tasks: charline_tasks\n",
++            "        max_commands: 4\n        visible: [overview, projects, tasks, settings]\n"
++            "        rewrites:\n          tasks: personal_tasks\n",
 +            encoding="utf-8",
 +        )
 +        plugin_entries = [
-+            ("charline", "Открыть Charline", ""),
-+            ("today", "Сегодня", ""),
-+            ("projects", "Проекты", ""),
-+            ("charline-tasks", "Задачи", ""),
-+            ("schedules", "Расписания", ""),
-+            ("settings", "Настройки", ""),
++            ("overview", "Overview", ""),
++            ("projects", "Projects", ""),
++            ("personal-tasks", "Personal tasks", ""),
++            ("settings", "Settings", ""),
 +        ]
 +        with patch("hermes_cli.commands._iter_plugin_command_entries", return_value=plugin_entries):
 +            menu, _hidden = telegram_menu_commands(max_commands=5)
 +
 +        assert [name for name, _description in menu] == [
-+            "today", "projects", "tasks", "schedules", "settings"
++            "overview", "projects", "tasks", "settings"
 +        ]
-+        assert dict(menu)["tasks"] == "Задачи"
 +        assert "commands" not in {name for name, _description in menu}
 +        assert resolve_command("commands") is not None
-+        assert telegram_command_menu_rewrite("/tasks") == "/charline_tasks"
++        assert telegram_command_menu_rewrite("/tasks") == "/personal_tasks"
 +        assert telegram_command_menu_rewrite("/tasks all") == "/tasks all"
 +
  
  
  
 diff --git a/tests/hermes_cli/test_platform_actions.py b/tests/hermes_cli/test_platform_actions.py
-index c32bdad9c..6ad126549 100644
+index c32bdad9cd18cf3b8a3860f10fefb883b8cf7911..00a4edbec3d1a0333186b6a8f88136b696e1afb8 100644
 --- a/tests/hermes_cli/test_platform_actions.py
 +++ b/tests/hermes_cli/test_platform_actions.py
-@@ -45,6 +45,11 @@ def _telegram_adapter(connected=True):
+@@ -45,6 +45,14 @@ def _telegram_adapter(connected=True):
      a.is_connected = connected
      a._set_reaction = AsyncMock(return_value=True)
      a.rename_dm_topic = AsyncMock(return_value=None)
@@ -820,89 +883,71 @@ index c32bdad9c..6ad126549 100644
 +    a.send_plugin_card = AsyncMock(
 +        return_value=SimpleNamespace(success=True, message_id="99", error=None)
 +    )
++    a.update_plugin_card = AsyncMock(
++        return_value=SimpleNamespace(success=True, message_id="99", error=None)
++    )
      return a
  
  
-@@ -187,6 +192,140 @@ class TestStructuredErrors:
+@@ -187,6 +195,119 @@ class TestStructuredErrors:
  
  
  class TestVerbRouting:
 +    def test_dispatch_agent_turn_routes_to_exact_chat_and_topic(self):
-+        actions = PlatformActions("charline")
++        actions = PlatformActions("example")
 +        adapter = _telegram_adapter()
 +        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
 +            result = asyncio.run(actions.dispatch_agent_turn(
-+                "telegram", "123", "Prepare today's personal brief",
++                "telegram", "123", "Prepare a brief",
 +                owner_user_id="42", thread_id="77",
 +            ))
-+
 +        assert result == {"ok": True, "action": "dispatch_agent_turn"}
 +        event = adapter.handle_message.await_args.args[0]
 +        assert event.internal is True
-+        assert event.text == "Prepare today's personal brief"
++        assert event.text == "Prepare a brief"
 +        assert event.source.chat_id == "123"
 +        assert event.source.thread_id == "77"
 +        assert event.source.user_id == "42"
 +
 +    def test_dispatch_agent_turn_requires_owner_and_prompt(self):
-+        actions = PlatformActions("charline")
++        actions = PlatformActions("example")
 +        adapter = _telegram_adapter()
 +        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
 +            result = asyncio.run(actions.dispatch_agent_turn(
 +                "telegram", "123", "", owner_user_id="",
 +            ))
-+
 +        assert result["error"] == "invalid_argument"
-+        adapter.handle_message.assert_not_awaited()
-+
-+    def test_start_private_topic_task_dispatches_original_request_into_topic(self):
-+        actions = PlatformActions("charline")
-+        adapter = _telegram_adapter()
-+        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
-+            result = asyncio.run(actions.start_private_topic_task(
-+                "telegram", "123", "Build RAG", "Create a production RAG system",
-+                owner_user_id="42", request_id="req-1",
-+            ))
-+
-+        assert result == {
-+            "ok": True,
-+            "action": "start_private_topic_task",
-+            "thread_id": "77",
-+            "request_id": "req-1",
-+        }
-+        event = adapter.handle_message.await_args.args[0]
-+        assert event.internal is True
-+        assert event.source.chat_id == "123"
-+        assert event.source.thread_id == "77"
-+        assert event.source.user_id == "42"
-+        assert "Create a production RAG system" in event.text
-+        assert "req-1" in event.text
-+
-+    def test_start_private_topic_task_requires_owner_and_task(self):
-+        actions = PlatformActions("charline")
-+        adapter = _telegram_adapter()
-+        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
-+            result = asyncio.run(actions.start_private_topic_task(
-+                "telegram", "123", "Build RAG", "", owner_user_id="",
-+            ))
-+
-+        assert result["error"] == "invalid_argument"
-+        adapter.ensure_dm_topic.assert_not_awaited()
 +        adapter.handle_message.assert_not_awaited()
 +
 +    def test_send_card_routes_without_exposing_adapter(self):
-+        actions = PlatformActions("charline")
++        actions = PlatformActions("example")
 +        adapter = _telegram_adapter()
 +        buttons = [[{"label": "Проекты", "action": "projects"}]]
 +        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
 +            result = asyncio.run(actions.send_card(
-+                "telegram", "123", "Charline", buttons,
++                "telegram", "123", "Example", buttons,
 +                thread_id="77", owner_user_id="42",
 +            ))
 +        assert result == {"ok": True, "action": "send_card", "message_id": "99"}
 +        adapter.send_plugin_card.assert_awaited_once_with(
-+            plugin_id="charline", chat_id="123", text="Charline",
++            plugin_id="example", chat_id="123", text="Example",
 +            buttons=buttons, thread_id="77", owner_user_id="42",
++        )
++
++    def test_update_card_routes_without_exposing_adapter(self):
++        actions = PlatformActions("example")
++        adapter = _telegram_adapter()
++        buttons = [[{"label": "Отмена", "action": "calendar.cancel"}]]
++        with _grant(True), _runner_with({Platform.TELEGRAM: adapter}):
++            result = asyncio.run(actions.update_card(
++                "telegram", "123", "99", "Записываю…", buttons,
++                thread_id="77", owner_user_id="42",
++            ))
++        assert result == {"ok": True, "action": "update_card", "message_id": "99"}
++        adapter.update_plugin_card.assert_awaited_once_with(
++            plugin_id="example", chat_id="123", message_id="99",
++            text="Записываю…", buttons=buttons, thread_id="77",
++            owner_user_id="42",
 +        )
 +
 +    def test_telegram_ensure_private_topic_routes_to_native_dm_topic(self):
@@ -964,72 +1009,20 @@ index c32bdad9c..6ad126549 100644
      def test_telegram_add_reaction_routes_to_set_reaction(self):
          actions = PlatformActions("p")
          adapter = _telegram_adapter()
-diff --git a/tests/tools/test_async_delegation.py b/tests/tools/test_async_delegation.py
-index d91ff8799..eda479812 100644
---- a/tests/tools/test_async_delegation.py
-+++ b/tests/tools/test_async_delegation.py
-@@ -261,6 +261,22 @@ def test_interrupt_all_signals_running_children():
-     assert evt["status"] == "interrupted"
- 
- 
-+def test_interrupt_one_requires_matching_session():
-+    calls = []
-+    with ad._records_lock:
-+        ad._records["deleg_one"] = {
-+            "delegation_id": "deleg_one",
-+            "status": "running",
-+            "session_key": "telegram:main",
-+            "interrupt_fn": lambda: calls.append("stopped"),
-+        }
-+
-+    assert ad.interrupt_delegation("deleg_one", session_key="telegram:other") is False
-+    assert calls == []
-+    assert ad.interrupt_delegation("deleg_one", session_key="telegram:main") is True
-+    assert calls == ["stopped"]
-+
-+
- def _fast_stale_monitor(monkeypatch, *, idle=0.15, in_tool=0.3, grace=0.15):
-     """Shrink the stale-monitor cadence so tests run in milliseconds."""
-     monkeypatch.setattr(ad, "_STALE_CHECK_INTERVAL", 0.03)
-@@ -824,4 +840,3 @@ def test_batch_truncation_banner_marks_only_truncated_task():
-     banner_pos = text.index("TRUNCATED")
-     # The header banner for task 2 appears after task 1's summary.
-     assert banner_pos > clean_pos
--
-diff --git a/tools/async_delegation.py b/tools/async_delegation.py
-index 4965363a0..3eff5f713 100644
---- a/tools/async_delegation.py
-+++ b/tools/async_delegation.py
-@@ -1585,6 +1585,27 @@ def interrupt_for_session(
-     return count
- 
- 
-+def interrupt_delegation(delegation_id: str, session_key: str = "") -> bool:
-+    """Interrupt one live delegation, optionally proving its owning session."""
-+    with _records_lock:
-+        record = _records.get(str(delegation_id))
-+        if (
-+            not record
-+            or record.get("status") not in ("running", "stalling")
-+            or (session_key and str(record.get("session_key") or "") != session_key)
-+        ):
-+            return False
-+        interrupt_fn = record.get("interrupt_fn")
-+    if not callable(interrupt_fn):
-+        return False
-+    try:
-+        interrupt_fn()
-+        return True
-+    except Exception as exc:
-+        logger.debug("interrupt_delegation: %s failed: %s", delegation_id, exc)
-+        return False
-+
-+
- def _reset_for_tests() -> None:
-     """Test-only: clear all state and tear down the executor + monitor."""
-     global _executor, _executor_max_workers, _monitor_thread
+diff --git a/website/docs/user-guide/features/hooks.md b/website/docs/user-guide/features/hooks.md
+index ace2d2998c7418c2845c5d7130d98b8db4519e68..b30686b491ecb15597907b74e872ae1009de4094 100644
+--- a/website/docs/user-guide/features/hooks.md
++++ b/website/docs/user-guide/features/hooks.md
+@@ -462,6 +462,7 @@ Payload fields below are the exact event-specific fields supplied by each call s
+ | `subagent_start` | Observer | Child constructed and about to run; return ignored. | `parent_session_id`, `parent_turn_id`, `parent_subagent_id`, `child_session_id`, `child_subagent_id`, `child_role`, `child_goal` | Child goal may contain user/project content. |
+ | `subagent_stop` | Observer | Child exit; return ignored. | `parent_session_id`, `parent_turn_id`, `child_session_id`, `child_role`, `child_summary`, `child_status`, `tool_call_history`, `duration_ms` | Summary and redacted tool-history metadata may reveal project structure. |
+ | `pre_gateway_dispatch` | Directive/control | Incoming non-internal message before auth/pairing/dispatch; first valid `skip`, `rewrite`, or `allow` controls flow. | `event`, `gateway`, `session_store` | Extremely privileged in-process objects expose inbound user/routing data and host handles. |
++| `post_auth_pre_agent_dispatch` | Directive/control | Authorized non-command user message after Gateway control/drain gates and before the active session slot is claimed; first valid `skip`, `rewrite`, or `allow` controls flow. | `event`, `gateway`, `session_store` | Privileged in-process objects expose authenticated inbound/routing data and host handles. |
+ | `gateway_platform_event` | Observer | After the gateway's profile-scoped authorization succeeds, when a supported platform-native event is normalized at the gateway boundary (Telegram: reactions, message edits; Discord: message edits/deletes, thread created/renamed); return ignored. | `platform`, `event_type`, `payload` (event-type-specific dict — see the per-event contracts below) | Normalized plain-dict envelope only; raw SDK objects, adapter handles, and bot clients are never exposed. |
+ | `pre_command` | Observer | Recognized slash command about to be dispatched, before the handler runs, on CLI and gateway cold-path dispatch; return ignored in v1 (directive-shaped dicts are logged at debug). Gateway running-agent intercept commands (`/stop`, `/approve` during an active run) are deliberately excluded — control-plane escape hatches must stay outside plugin reach. | `surface` (`"cli"` \| `"gateway"`), `command` (canonical name), `alias_used`, `args_raw`, `session_key`, `platform` | `args_raw` may contain user content or secrets typed after the command. |
+ | `pre_approval_request` | Observer | Before prompted or smart approval; return ignored. | `command`, `description`, `pattern_key`, `pattern_keys`, `session_key`, `surface`, `turn_id`, `tool_call_id` | Command may contain secrets; smart observer preparation force-redacts, but surfaces do not all have identical redaction. |
 diff --git a/website/docs/user-guide/features/plugins.md b/website/docs/user-guide/features/plugins.md
-index 7c1979482..b2afdff10 100644
+index 7c1979482c3429d42360885db19df6f421031fa9..13b1f9a74ea7b4c03b33cb873883e23ff039e66d 100644
 --- a/website/docs/user-guide/features/plugins.md
 +++ b/website/docs/user-guide/features/plugins.md
 @@ -413,7 +413,7 @@ default**: every call re-checks the `gateway.platform_actions` capability
@@ -1041,7 +1034,7 @@ index 7c1979482..b2afdff10 100644
  hook dispatch):
  
  ```python
-@@ -423,18 +423,52 @@ result = await ctx.platform_actions.add_reaction(
+@@ -423,18 +423,58 @@ result = await ctx.platform_actions.add_reaction(
  result = await ctx.platform_actions.set_thread_title(
      platform="discord", chat_id="123", thread_id="456", title="New title",
  )
@@ -1049,17 +1042,17 @@ index 7c1979482..b2afdff10 100644
 +    platform="telegram", chat_id="123", title="Project Alpha",
 +)
 +result = await ctx.platform_actions.dispatch_agent_turn(
-+    platform="telegram", chat_id="123", prompt="Prepare today's brief",
-+    owner_user_id="42", thread_id="",
-+)
-+result = await ctx.platform_actions.start_private_topic_task(
-+    platform="telegram", chat_id="123", title="Project Alpha",
-+    task="Build and test the site", owner_user_id="42", request_id="req-1",
++    platform="telegram", chat_id="123", thread_id="77",
++    owner_user_id="42", prompt="Continue this work in the topic",
 +)
 +result = await ctx.platform_actions.send_card(
 +    platform="telegram", chat_id="123", text="Projects",
 +    buttons=[[{"label": "Back", "action": "home"}]],
 +    owner_user_id="42", thread_id="77",
++)
++result = await ctx.platform_actions.update_card(
++    platform="telegram", chat_id="123", message_id="99", text="Done",
++    buttons=[], owner_user_id="42", thread_id="77",
 +)
  if not result["ok"]:
      print(result["error"], result.get("detail"))
@@ -1069,10 +1062,7 @@ index 7c1979482..b2afdff10 100644
 +Success is `{"ok": True, "action": <verb>}` (topic creation also returns
 +`thread_id`). `ensure_private_topic` is Telegram-only and idempotently reuses
 +an existing configured title; the Telegram adapter remains responsible for
-+topic creation and persistent `dm_topics` metadata. `dispatch_agent_turn`
-+re-enters the normal Hermes model path at an exact chat/thread route;
-+`start_private_topic_task` combines that with idempotent topic creation and
-+preserves the caller's request id. Failures are
++topic creation and persistent `dm_topics` metadata. Failures are
  `{"ok": False, "error": <code>, "detail": <str>}` with stable error codes:
  `capability_not_granted`, `invalid_argument`, `gateway_unavailable`,
  `unknown_platform`, `adapter_not_registered`, `adapter_disconnected`,
@@ -1092,6 +1082,15 @@ index 7c1979482..b2afdff10 100644
 +startup and the payload contains only stable action/entity identifiers,
 +read-only navigation survives a Gateway restart without a UI-state database.
 +Use separate expiring application confirmation tokens for mutations.
++`update_card` updates such a card by stable chat/message id without exposing
++the Telegram SDK object, which lets supervised plugin tasks publish completion.
++
++Plugins that implement bounded fast actions may register
++`post_auth_pre_agent_dispatch`. It runs for an authorized, non-command user
++message after Gateway control/drain checks and immediately before Hermes claims
++the active session slot. It accepts the same `skip`/`rewrite`/`allow` directive
++shape as `pre_gateway_dispatch`; returning `skip` means the plugin fully owns
++that message. The hook must return promptly and use `ctx.spawn_task()` for I/O.
 +
  Platforms supported in v1: Telegram and Discord. Telegram's `add_reaction`
  *sets* the bot's reaction (the Bot API replaces a previous bot reaction rather

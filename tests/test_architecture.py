@@ -68,16 +68,30 @@ def test_hermes_patch_is_pinned_and_carries_runtime_tests():
     assert len(base) == 40
     assert "hermes_cli/platform_actions.py" in patch
     assert "ensure_private_topic" in patch
-    assert "start_private_topic_task" in patch
+    assert "start_private_topic_task" not in patch
     assert "dispatch_agent_turn" in patch
     assert "tests/hermes_cli/test_platform_actions.py" in patch
     assert "send_card" in patch
+    assert "update_card" in patch
+    assert "post_auth_pre_agent_dispatch" in patch
     assert "plugin_callback" in patch
     assert "command_menu" in patch
-    assert "interrupt_delegation" in patch
-    assert "test_plugin_card_treats_unchanged_refresh_as_success" in patch
     assert 'if "not modified" in str(exc).lower()' in patch
     assert "gateway/slash_commands.py" not in patch
+
+
+def test_daily_product_contract_has_four_views_and_no_admin_panels():
+    plugin = (ROOT / "plugins" / "charline" / "__init__.py").read_text(encoding="utf-8")
+    ui = (ROOT / "plugins" / "charline" / "ui.py").read_text(encoding="utf-8")
+    assert 'name="schedules"' not in plugin
+    for forbidden in (
+        "def schedules(",
+        "def memory(",
+        "mutate_schedule",
+        "stop_task",
+        "process_registry",
+    ):
+        assert forbidden not in ui
 
 
 def test_windows_calendar_patch_bypasses_fragile_shell_bootstrap():
