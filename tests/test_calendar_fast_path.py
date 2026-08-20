@@ -11,6 +11,7 @@ from plugins.charline.calendar_fast_path import (
     PendingActionStore,
     is_exact_calendar_candidate,
     resolve_calendar_draft,
+    parse_duration_minutes,
 )
 
 
@@ -77,6 +78,14 @@ def test_missing_parameters_are_reported_without_guessing():
         resolve_calendar_draft(_draft(duration_minutes=None, missing_fields=["duration_minutes"]),
                                now=datetime.now(ZoneInfo("UTC")), profile_timezone="UTC")
     assert exc.value.fields == ("duration_minutes",)
+
+
+def test_duration_reply_parser_is_narrow_and_bounded():
+    assert parse_duration_minutes("45 минут") == 45
+    assert parse_duration_minutes("1 час 30 минут") == 90
+    assert parse_duration_minutes("полтора часа") == 90
+    assert parse_duration_minutes("завтра") is None
+    assert parse_duration_minutes("0 минут") is None
 
 
 @pytest.mark.parametrize("text", [

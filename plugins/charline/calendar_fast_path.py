@@ -62,6 +62,29 @@ def is_exact_calendar_candidate(text: str) -> bool:
     return bool(create and temporal)
 
 
+def parse_duration_minutes(text: str) -> int | None:
+    """Parse one narrow duration reply without another model call."""
+    normalized = " ".join(str(text or "").casefold().replace(",", ".").split())
+    if normalized in {"полтора часа", "полтора ч", "an hour and a half"}:
+        return 90
+    minute = re.fullmatch(
+        r"(\d{1,4})\s*(?:мин(?:ут(?:а|ы)?|\.)?|minutes?|mins?)",
+        normalized,
+    )
+    if minute:
+        value = int(minute.group(1))
+        return value if 0 < value <= 1440 else None
+    hour = re.fullmatch(
+        r"(\d{1,2})\s*(?:ч(?:ас(?:а|ов)?)?\.?|hours?)"
+        r"(?:\s*(\d{1,3})\s*(?:мин(?:ут(?:а|ы)?|\.)?|minutes?|mins?))?",
+        normalized,
+    )
+    if not hour:
+        return None
+    value = int(hour.group(1)) * 60 + int(hour.group(2) or 0)
+    return value if 0 < value <= 1440 else None
+
+
 def _parse_wall_time(raw: Any, field: str) -> time:
     try:
         return time.fromisoformat(str(raw))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import secrets
 import time
@@ -12,6 +13,7 @@ from .calendar_fast_path import (
     DraftIncomplete,
     PendingActionStore,
     is_exact_calendar_candidate,
+    parse_duration_minutes,
     resolve_calendar_draft,
 )
 from .calendar_google import GoogleCalendarExecutor
@@ -81,6 +83,9 @@ def _default_timezone() -> str:
 
 
 class CalendarFastPath:
+    CLARIFICATION_KEY = "calendar_clarifications"
+    CLARIFICATION_TTL_SECONDS = 600
+
     def __init__(
         self,
         ctx: Any,
@@ -93,7 +98,7 @@ class CalendarFastPath:
         self._actions = ctx.platform_actions
         self._llm = ctx.llm
         self._store = PendingActionStore(ctx.state, now=time.time)
-        self._executor = executor or GoogleCalendarExecutor()
+        self._executor = executor
         self._now = now
         self._timezone_loader = timezone_loader
 
@@ -114,7 +119,17 @@ class CalendarFastPath:
         """Run only from Hermes' post-auth/pre-agent hook."""
         source = self._source(event)
         text = str(getattr(event, "text", "") or "")
-        if source is None or text.startswith("/") or not is_exact_calendar_candidate(text):
+        if source is None or text.startswith("/"):
+            return None
+        pending = self._pending_clarification(source)
+        if pending is not None:
+            operation_id = secrets.token_hex(4)
+            self._ctx.spawn_task(
+                self._resume(text, source, pending, operation_id),
+                name="charline:calendar-clarification",
+            )
+            return {"action": "skip", "reason": "charline_calendar_fast_path"}
+        if not is_exact_calendar_candidate(text):
             return None
         operation_id = secrets.token_hex(4)
         logger.info(
@@ -148,9 +163,15 @@ class CalendarFastPath:
             if not isinstance(draft, Mapping) or draft.get("intent") != "calendar_create":
                 await self._fallback(text, source)
                 return
-            event = resolve_calendar_draft(
-                draft, now=self._now(), profile_timezone=self._timezone_loader()
-            )
+            try:
+                event = resolve_calendar_draft(
+                    draft, now=self._now(), profile_timezone=self._timezone_loader()
+                )
+            except DraftIncomplete as exc:
+                if exc.fields == ("duration_minutes",):
+                    await self._ask_duration(text, draft, source)
+                    return
+                raise
         except (DraftIncomplete, ValueError, TypeError):
             await self._fallback(text, source)
             return
@@ -159,6 +180,100 @@ class CalendarFastPath:
             await self._fallback(text, source)
             return
 
+        await self._send_preview(event, source, operation_id)
+
+    @staticmethod
+    def _route_key(source: Any) -> str:
+        return ":".join((
+            str(source.user_id), str(source.chat_id), str(source.thread_id or "")
+        ))
+
+    def _pending_clarification(self, source: Any) -> dict[str, Any] | None:
+        raw = self._ctx.state.get(self.CLARIFICATION_KEY, {})
+        items = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+        key = self._route_key(source)
+        item = items.get(key)
+        if not isinstance(item, dict):
+            return None
+        if time.time() - float(item.get("created_at", 0)) <= self.CLARIFICATION_TTL_SECONDS:
+            return item
+        items.pop(key, None)
+        self._ctx.state.set(self.CLARIFICATION_KEY, items)
+        return None
+
+    def _save_clarification(
+        self, source: Any, *, text: str, draft: Mapping[str, Any]
+    ) -> None:
+        raw = self._ctx.state.get(self.CLARIFICATION_KEY, {})
+        items = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+        items[self._route_key(source)] = {
+            "created_at": time.time(),
+            "text": text,
+            "draft": copy.deepcopy(dict(draft)),
+        }
+        self._ctx.state.set(self.CLARIFICATION_KEY, items)
+
+    def _clear_clarification(self, source: Any) -> None:
+        raw = self._ctx.state.get(self.CLARIFICATION_KEY, {})
+        items = copy.deepcopy(raw) if isinstance(raw, dict) else {}
+        if items.pop(self._route_key(source), None) is not None:
+            self._ctx.state.set(self.CLARIFICATION_KEY, items)
+
+    async def _ask_duration(
+        self, text: str, draft: Mapping[str, Any], source: Any
+    ) -> None:
+        self._save_clarification(source, text=text, draft=draft)
+        title = " ".join(str(draft.get("title") or "событие").split())
+        await self._send_text(
+            source,
+            f"Сколько будет длиться «{title}»? Например: 45 минут. Для отмены: отмена.",
+        )
+
+    async def _send_text(self, source: Any, text: str) -> None:
+        await self._actions.send_card(
+            platform="telegram",
+            chat_id=str(source.chat_id),
+            thread_id=str(source.thread_id or ""),
+            owner_user_id=str(source.user_id),
+            text=text,
+            buttons=[],
+        )
+
+    async def _resume(
+        self,
+        text: str,
+        source: Any,
+        pending: Mapping[str, Any],
+        operation_id: str,
+    ) -> None:
+        if " ".join(text.casefold().split()) in {"отмена", "отменить", "cancel"}:
+            self._clear_clarification(source)
+            await self._send_text(source, "Создание события отменено.")
+            return
+        duration = parse_duration_minutes(text)
+        if duration is None:
+            await self._send_text(
+                source, "Не понял длительность. Напишите, например: 45 минут."
+            )
+            return
+        draft = copy.deepcopy(dict(pending.get("draft") or {}))
+        draft["duration_minutes"] = duration
+        draft["missing_fields"] = [
+            field for field in draft.get("missing_fields", [])
+            if field != "duration_minutes"
+        ]
+        try:
+            event = resolve_calendar_draft(
+                draft, now=self._now(), profile_timezone=self._timezone_loader()
+            )
+        except (DraftIncomplete, ValueError, TypeError):
+            self._clear_clarification(source)
+            await self._fallback(f"{pending.get('text', '')}\nДлительность: {text}", source)
+            return
+        self._clear_clarification(source)
+        await self._send_preview(event, source, operation_id)
+
+    async def _send_preview(self, event: Any, source: Any, operation_id: str) -> None:
         action_id = self._store.create(
             owner_user_id=str(source.user_id),
             chat_id=str(source.chat_id),
@@ -258,7 +373,8 @@ class CalendarFastPath:
         self._store.mark_external_started(action_id)
         logger.info("calendar_fast_path milestone=google_started action_id=%s", action_id)
         try:
-            result = await self._executor.execute(item["payload"])
+            executor = self._executor or GoogleCalendarExecutor()
+            result = await executor.execute(item["payload"])
         except Exception as exc:
             self._store.mark_unknown(action_id, error=str(exc))
             result = None
@@ -311,7 +427,8 @@ class CalendarFastPath:
                 text = "Событие не создавалось: Gateway остановился до обращения к Google."
             else:
                 try:
-                    result = await self._executor.reconcile(
+                    executor = self._executor or GoogleCalendarExecutor()
+                    result = await executor.reconcile(
                         item["payload"], str(item.get("external_resource_id") or "")
                     )
                 except Exception as exc:

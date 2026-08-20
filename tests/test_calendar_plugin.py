@@ -42,8 +42,8 @@ def _draft(missing=None):
 
 
 class FakeContext:
-    def __init__(self, parsed):
-        self.state = FakeState()
+    def __init__(self, parsed, *, state=None):
+        self.state = state or FakeState()
         self.platform_actions = SimpleNamespace(
             send_card=AsyncMock(return_value={"ok": True, "message_id": "9"}),
             update_card=AsyncMock(return_value={"ok": True, "message_id": "9"}),
@@ -98,14 +98,48 @@ def test_candidate_uses_one_parse_call_and_sends_confirmation_card():
     asyncio.run(scenario())
 
 
-def test_incomplete_draft_falls_back_to_normal_hermes_once():
+def test_missing_duration_asks_directly_without_full_agent_turn():
     async def scenario():
         ctx = FakeContext(_draft(missing=True))
         fast = _fast(ctx)
         fast.intercept(_event())
         await _drain(ctx)
-        ctx.platform_actions.send_card.assert_not_awaited()
-        ctx.platform_actions.dispatch_agent_turn.assert_awaited_once()
+        card = ctx.platform_actions.send_card.await_args.kwargs
+        assert "45" in card["text"]
+        ctx.platform_actions.dispatch_agent_turn.assert_not_awaited()
+        ctx.llm.acomplete_structured.assert_awaited_once()
+    asyncio.run(scenario())
+
+
+def test_duration_reply_completes_direct_preview_without_main_context():
+    async def scenario():
+        state = FakeState()
+        first = FakeContext(_draft(missing=True), state=state)
+        fast = _fast(first)
+
+        fast.intercept(_event())
+        await _drain(first)
+
+        restarted = FakeContext(_draft(missing=True), state=state)
+        fast = _fast(restarted)
+        foreign = _event("45 минут")
+        foreign.source.user_id = "99"
+        assert fast.intercept(foreign) is None
+        assert fast.intercept(_event("45 минут")) == {
+            "action": "skip",
+            "reason": "charline_calendar_fast_path",
+        }
+        await _drain(restarted)
+
+        preview = restarted.platform_actions.send_card.await_args.kwargs
+        assert "14:00" in preview["text"]
+        assert "14:45" in preview["text"]
+        assert len(preview["buttons"][0]) == 2
+        first.platform_actions.dispatch_agent_turn.assert_not_awaited()
+        restarted.platform_actions.dispatch_agent_turn.assert_not_awaited()
+        first.llm.acomplete_structured.assert_awaited_once()
+        restarted.llm.acomplete_structured.assert_not_awaited()
+
     asyncio.run(scenario())
 
 
