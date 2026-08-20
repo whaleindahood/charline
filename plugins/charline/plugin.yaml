@@ -1,5 +1,5 @@
 name: charline
-version: 1.2.0
+version: 1.3.0
 description: "Personal Telegram assistant UX and native project execution for Charline."
 author: Charline
 capabilities:
@@ -8,5 +8,6 @@ provides_hooks:
   - pre_gateway_dispatch
   - post_auth_pre_agent_dispatch
   - gateway_platform_event
+  - pre_llm_call
 provides_tools:
   - charline_projects

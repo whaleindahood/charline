@@ -125,6 +125,29 @@ def test_pending_action_claim_is_durable_owner_bound_and_once_only():
     assert restarted.get(action_id)["external_resource_id"] == "event-1"
 
 
+def test_executing_actions_preserve_message_and_survive_restart_for_reconciliation():
+    state = FakeState()
+    store = PendingActionStore(state, now=lambda: 1_000.0)
+    action_id = store.create(
+        owner_user_id="42", chat_id="123", thread_id="7", payload={"title": "Walk"}
+    )
+
+    store.claim(
+        action_id,
+        owner_user_id="42",
+        chat_id="123",
+        thread_id="7",
+        message_id="91",
+    )
+    store.mark_external_started(action_id)
+
+    restarted = PendingActionStore(state, now=lambda: 1_001.0)
+    actions = restarted.recoverable()
+    assert [item["action_id"] for item in actions] == [action_id]
+    assert actions[0]["message_id"] == "91"
+    assert actions[0]["external_started_at"] == 1_000.0
+
+
 def test_cancel_and_expiry_never_claim():
     state = FakeState()
     clock = SimpleNamespace(value=1_000.0)

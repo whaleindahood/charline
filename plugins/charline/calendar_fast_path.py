@@ -238,7 +238,15 @@ class PendingActionStore:
             and item.get("thread_id") == str(thread_id or "")
         )
 
-    def claim(self, action_id: str, *, owner_user_id: str, chat_id: str, thread_id: str):
+    def claim(
+        self,
+        action_id: str,
+        *,
+        owner_user_id: str,
+        chat_id: str,
+        thread_id: str,
+        message_id: str = "",
+    ):
         with self._lock:
             actions = self._load()
             item = actions.get(action_id)
@@ -253,8 +261,26 @@ class PendingActionStore:
                 return None
             item["status"] = "executing"
             item["execution_started_at"] = self._now()
+            item["message_id"] = str(message_id or "")
             self._save(actions)
             return copy.deepcopy(item)
+
+    def mark_external_started(self, action_id: str) -> None:
+        with self._lock:
+            actions = self._load()
+            item = actions.get(action_id)
+            if not item or item.get("status") != "executing":
+                return
+            item["external_started_at"] = self._now()
+            self._save(actions)
+
+    def recoverable(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                copy.deepcopy(item)
+                for item in self._load().values()
+                if item.get("status") == "executing"
+            ]
 
     def cancel(self, action_id: str, *, owner_user_id: str, chat_id: str, thread_id: str) -> bool:
         with self._lock:

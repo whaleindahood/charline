@@ -4,7 +4,12 @@ from subprocess import CompletedProcess
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.health_check import collect_health, default_runner
+from scripts.health_check import (
+    _plugin_state_path,
+    _tree_digest,
+    collect_health,
+    default_runner,
+)
 
 
 class HealthCheckTests(unittest.TestCase):
@@ -20,6 +25,10 @@ class HealthCheckTests(unittest.TestCase):
         (target / "SKILL.md").write_text("managed", encoding="utf-8")
         (hermes / "google_token.json").write_text("not-read", encoding="utf-8")
         (hermes / "google_client_secret.json").write_text("not-read", encoding="utf-8")
+        patch_root = project / "patches" / "hermes-agent"
+        patch_root.mkdir(parents=True)
+        (patch_root / "charline.patch").write_text("generic", encoding="utf-8")
+        (patch_root / "windows-calendar.patch").write_text("windows", encoding="utf-8")
         return project, hermes
 
     def test_reports_consistent_for_independent_repo_synced_skills_and_runtime(self):
@@ -121,6 +130,34 @@ class HealthCheckTests(unittest.TestCase):
                 runner=lambda command: (0, "ok"),
             )
             self.assertTrue(result["checks"]["charline_plugin"]["ok"])
+
+    def test_detects_gateway_loaded_plugin_version_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, hermes = self.make_healthy_fixture(Path(tmp))
+            source = project / "plugins" / "charline"
+            target = hermes / "plugins" / "charline"
+            source.mkdir(parents=True)
+            target.mkdir(parents=True)
+            (source / "plugin.yaml").write_text("name: charline\n", encoding="utf-8")
+            (target / "plugin.yaml").write_text("name: charline\n", encoding="utf-8")
+            state_path = _plugin_state_path(hermes)
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text(
+                '{"runtime_version":{"plugin_hash":"stale","plugin_version":"1.2.0"}}',
+                encoding="utf-8",
+            )
+
+            result = collect_health(
+                project_root=project,
+                hermes_home=hermes,
+                runner=lambda command: (0, "test-commit"),
+            )
+
+            self.assertFalse(result["checks"]["runtime_loaded_plugin"]["ok"])
+            self.assertEqual(
+                result["checks"]["charline_plugin"]["detail"]["target_hash"],
+                _tree_digest(target),
+            )
 
     def test_reports_degraded_instead_of_raising_on_unexpected_runner_error(self):
         with tempfile.TemporaryDirectory() as tmp:

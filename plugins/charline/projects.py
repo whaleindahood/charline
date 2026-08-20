@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectNameError(ValueError):
@@ -100,6 +104,7 @@ class ProjectService:
             "telegram", str(chat_id), name
         )
         created = self._verified_creation(chat_id, name, ensured)
+        logger.info("project milestone=topic_ready thread_id=%s", created.thread_id)
         dispatched = await self._actions.dispatch_agent_turn(
             platform="telegram",
             chat_id=str(chat_id),
@@ -112,6 +117,7 @@ class ProjectService:
             raise RuntimeError(
                 f"Проект создан, но работу в его теме запустить не удалось: {detail}"
             )
+        logger.info("project milestone=dispatched thread_id=%s", created.thread_id)
         return created
 
     def _verified_creation(

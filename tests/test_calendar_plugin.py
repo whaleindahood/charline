@@ -109,6 +109,23 @@ def test_incomplete_draft_falls_back_to_normal_hermes_once():
     asyncio.run(scenario())
 
 
+def test_uncertain_unsupported_or_multiple_actions_fall_back_without_mutation():
+    async def scenario(intent):
+        draft = _draft()
+        draft["intent"] = intent
+        ctx = FakeContext(draft)
+        executor = SimpleNamespace(execute=AsyncMock())
+        fast = _fast(ctx, executor)
+        fast.intercept(_event())
+        await _drain(ctx)
+        ctx.platform_actions.dispatch_agent_turn.assert_awaited_once()
+        ctx.platform_actions.send_card.assert_not_awaited()
+        executor.execute.assert_not_awaited()
+
+    for intent in ("uncertain", "unsupported", "multiple_actions"):
+        asyncio.run(scenario(intent))
+
+
 def test_confirm_returns_immediately_executes_once_and_updates_same_card():
     async def scenario():
         ctx = FakeContext(_draft())
@@ -131,6 +148,73 @@ def test_confirm_returns_immediately_executes_once_and_updates_same_card():
         updated = ctx.platform_actions.update_card.await_args.kwargs
         assert updated["message_id"] == "9"
         assert "Событие создано" in updated["text"]
+    asyncio.run(scenario())
+
+
+def test_restart_reconciles_executing_write_without_repeating_insert():
+    async def scenario():
+        ctx = FakeContext(_draft())
+        executor = SimpleNamespace(
+            execute=AsyncMock(),
+            reconcile=AsyncMock(return_value=CalendarExecutionResult(
+                "completed", "event-1", "https://calendar"
+            )),
+        )
+        fast = _fast(ctx, executor)
+        action_id = fast._store.create(
+            owner_user_id="42",
+            chat_id="123",
+            thread_id="",
+            payload={
+                "title": "Прогулка",
+                "start": "2026-08-21T14:00:00+03:00",
+                "end": "2026-08-21T15:30:00+03:00",
+                "timezone": "Europe/Moscow",
+            },
+        )
+        fast._store.claim(
+            action_id,
+            owner_user_id="42",
+            chat_id="123",
+            thread_id="",
+            message_id="9",
+        )
+        fast._store.mark_external_started(action_id)
+
+        await fast.recover()
+
+        executor.execute.assert_not_awaited()
+        executor.reconcile.assert_awaited_once()
+        assert fast._store.get(action_id)["status"] == "completed"
+        updated = ctx.platform_actions.update_card.await_args.kwargs
+        assert updated["message_id"] == "9"
+        assert "Событие создано" in updated["text"]
+
+    asyncio.run(scenario())
+
+
+def test_restart_before_external_call_marks_definite_failure_without_google_call():
+    async def scenario():
+        ctx = FakeContext(_draft())
+        executor = SimpleNamespace(execute=AsyncMock(), reconcile=AsyncMock())
+        fast = _fast(ctx, executor)
+        action_id = fast._store.create(
+            owner_user_id="42", chat_id="123", thread_id="", payload={"title": "Walk"}
+        )
+        fast._store.claim(
+            action_id,
+            owner_user_id="42",
+            chat_id="123",
+            thread_id="",
+            message_id="9",
+        )
+
+        await fast.recover()
+
+        executor.execute.assert_not_awaited()
+        executor.reconcile.assert_not_awaited()
+        assert fast._store.get(action_id)["status"] == "failed"
+
     asyncio.run(scenario())
 
 

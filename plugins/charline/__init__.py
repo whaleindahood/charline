@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
+import logging
+import time
 from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Optional
 
@@ -12,6 +17,23 @@ from .projects import ProjectNameError, ProjectService
 from .ui import CharlineUi
 from .calendar import CalendarFastPath, _default_now, _default_timezone
 from .today import TodayService
+
+
+logger = logging.getLogger(__name__)
+PLUGIN_VERSION = "1.3.0"
+
+
+def plugin_code_hash(root: Path | None = None) -> str:
+    root = Path(root or Path(__file__).parent)
+    digest = sha256()
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if not path.is_file() or "__pycache__" in relative.parts or path.suffix == ".pyc":
+            continue
+        digest.update(relative.as_posix().encode("utf-8") + b"\0")
+        payload = path.read_bytes().replace(b"\r\n", b"\n")
+        digest.update(sha256(payload).hexdigest().encode("ascii"))
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -39,19 +61,23 @@ class CharlinePlugin:
         config_loader: Callable[[], Mapping[str, Any]] = _default_config_loader,
         data: Any = None,
         today_service: Any = None,
+        now=_default_now,
+        timezone_loader=_default_timezone,
     ):
         self.actions = ctx.platform_actions
         self._ctx = ctx
         self.projects = ProjectService(ctx.platform_actions, config_loader)
-        self.ui = CharlineUi(self.projects, data)
+        self.ui = CharlineUi(self.projects, data, timezone_loader=timezone_loader)
+        self._now = now
+        self._timezone_loader = timezone_loader
         self.today = today_service or TodayService(
             self.projects,
             self.ui.data,
-            now=_default_now,
-            timezone_loader=_default_timezone,
+            now=now,
+            timezone_loader=timezone_loader,
         )
         self.calendar = (
-            CalendarFastPath(ctx)
+            CalendarFastPath(ctx, now=now, timezone_loader=timezone_loader)
             if all(hasattr(ctx, name) for name in ("llm", "state", "spawn_task"))
             else None
         )
@@ -249,6 +275,30 @@ class CharlinePlugin:
             return None
         return self.calendar.intercept(event, **kwargs)
 
+    def runtime_time_context(self, **_: Any) -> dict[str, str]:
+        now = self._now()
+        timezone_name = self._timezone_loader()
+        return {
+            "context": (
+                f"Current runtime datetime: {now.isoformat()}; IANA timezone: "
+                f"{timezone_name or 'not configured'}. Resolve relative dates from this "
+                "fresh value, never from the session start date."
+            )
+        }
+
+    def record_runtime_version(self) -> None:
+        state = getattr(self._ctx, "state", None)
+        if state is None or not hasattr(state, "set"):
+            return
+        try:
+            state.set("runtime_version", {
+                "plugin_version": PLUGIN_VERSION,
+                "plugin_hash": plugin_code_hash(),
+                "loaded_at": time.time(),
+            })
+        except Exception:
+            logger.warning("charline runtime version record failed", exc_info=True)
+
 
 def register(ctx: Any) -> None:
     plugin = CharlinePlugin(ctx)
@@ -261,6 +311,15 @@ def register(ctx: Any) -> None:
     ctx.register_hook("pre_gateway_dispatch", plugin.capture_request)
     ctx.register_hook("post_auth_pre_agent_dispatch", plugin.fast_action)
     ctx.register_hook("gateway_platform_event", plugin.platform_event)
+    ctx.register_hook("pre_llm_call", plugin.runtime_time_context)
+    plugin.record_runtime_version()
+    if plugin.calendar is not None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            ctx.spawn_task(plugin.calendar.recover(), name="charline:calendar-recovery")
     ctx.register_command(
         name="charline",
         handler=plugin.charline_command,

@@ -74,3 +74,41 @@ def test_timeout_with_reconciliation_match_is_completed():
     result = asyncio.run(GoogleCalendarExecutor(command_runner=run, script_path="google_api.py").execute(EVENT))
     assert result.status == "completed"
     assert result.external_resource_id == "reconciled"
+
+
+def test_windows_child_crash_is_unknown_and_reconciled_without_write_retry():
+    calls = []
+
+    async def run(argv, timeout):
+        del timeout
+        calls.append(argv)
+        if len(calls) == 1:
+            return -1073741819, "", "python child crashed", False
+        return 0, "[]", "", False
+
+    result = asyncio.run(
+        GoogleCalendarExecutor(command_runner=run, script_path="google_api.py").execute(EVENT)
+    )
+
+    assert result.status == "unknown"
+    assert [call[2:4] for call in calls] == [
+        ["calendar", "create"],
+        ["calendar", "list"],
+    ]
+
+
+def test_restart_reconciliation_is_read_only():
+    calls = []
+
+    async def run(argv, timeout):
+        del timeout
+        calls.append(argv)
+        return 0, _listed("reconciled"), "", False
+
+    result = asyncio.run(
+        GoogleCalendarExecutor(command_runner=run, script_path="google_api.py").reconcile(EVENT)
+    )
+
+    assert result.status == "completed"
+    assert len(calls) == 1
+    assert calls[0][2:4] == ["calendar", "list"]

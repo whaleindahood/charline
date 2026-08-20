@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -143,8 +145,29 @@ def test_plugin_registers_only_four_daily_views_and_generic_hooks() -> None:
         "charline", "charline-tasks", "projects", "settings", "today"
     }
     assert [call.args[0] for call in ctx.register_hook.call_args_list] == [
-        "pre_gateway_dispatch", "post_auth_pre_agent_dispatch", "gateway_platform_event"
+        "pre_gateway_dispatch", "post_auth_pre_agent_dispatch", "gateway_platform_event",
+        "pre_llm_call",
     ]
+
+
+def test_gateway_registration_starts_calendar_recovery_when_loop_is_running() -> None:
+    async def scenario():
+        ctx = MagicMock()
+        ctx.platform_actions = MagicMock()
+        ctx.state.get.return_value = {}
+        tasks = []
+
+        def spawn(coro, *, name=None):
+            task = asyncio.create_task(coro, name=name)
+            tasks.append(task)
+            return task
+
+        ctx.spawn_task.side_effect = spawn
+        register(ctx)
+        await asyncio.gather(*tasks)
+        assert [task.get_name() for task in tasks] == ["charline:calendar-recovery"]
+
+    asyncio.run(scenario())
 
 
 def test_root_and_topics_keep_their_exact_context() -> None:
@@ -156,6 +179,25 @@ def test_root_and_topics_keep_their_exact_context() -> None:
     assert plugin.capture_request(project, MagicMock()) is None
     assert plugin.current_request().source.thread_id == "77"
     assert root.text == project.text == "hello"
+
+
+def test_runtime_time_context_is_fresh_on_every_normal_turn() -> None:
+    clock = SimpleNamespace(
+        value=datetime(2026, 8, 20, 23, 59, tzinfo=ZoneInfo("Europe/Moscow"))
+    )
+    plugin = CharlinePlugin(
+        SimpleNamespace(platform_actions=MagicMock()),
+        now=lambda: clock.value,
+        timezone_loader=lambda: "Europe/Moscow",
+    )
+
+    first = plugin.runtime_time_context()["context"]
+    clock.value = datetime(2026, 8, 21, 0, 1, tzinfo=ZoneInfo("Europe/Moscow"))
+    second = plugin.runtime_time_context()["context"]
+
+    assert "2026-08-20T23:59:00+03:00" in first
+    assert "2026-08-21T00:01:00+03:00" in second
+    assert "Europe/Moscow" in second
 
 
 def test_daily_ui_has_four_views_without_runtime_admin_controls() -> None:

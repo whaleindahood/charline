@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import secrets
+import time as monotonic
 from datetime import datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .calendar_google import GoogleCalendarReader
+
+
+logger = logging.getLogger(__name__)
 
 
 def _button(label: str, action: str) -> dict[str, str]:
@@ -23,14 +29,38 @@ class TodayService:
         calendar_reader: Any = None,
         now,
         timezone_loader,
+        source_timeout_seconds: float = 8,
     ):
         self._projects = projects
         self._data = data
-        self._calendar = calendar_reader or GoogleCalendarReader()
+        self._calendar = calendar_reader
         self._now = now
         self._timezone_loader = timezone_loader
+        self._source_timeout = source_timeout_seconds
+
+    async def _read(self, name: str, awaitable: Any, operation_id: str) -> Any:
+        started = monotonic.perf_counter()
+        try:
+            value = await asyncio.wait_for(awaitable, timeout=self._source_timeout)
+            logger.info(
+                "today operation_id=%s milestone=source_completed source=%s duration_ms=%d",
+                operation_id,
+                name,
+                (monotonic.perf_counter() - started) * 1000,
+            )
+            return value
+        except Exception as exc:
+            logger.warning(
+                "today operation_id=%s milestone=source_failed source=%s duration_ms=%d error=%s",
+                operation_id,
+                name,
+                (monotonic.perf_counter() - started) * 1000,
+                type(exc).__name__,
+            )
+            return None
 
     async def card(self, source: Any) -> dict[str, Any]:
+        operation_id = secrets.token_hex(4)
         timezone_name = self._timezone_loader()
         runtime_now = self._now()
         try:
@@ -41,11 +71,17 @@ class TodayService:
         local_now = runtime_now.astimezone(zone)
         start = datetime.combine(local_now.date(), time.min, tzinfo=zone)
         end = start + timedelta(days=1)
+        if self._calendar is None:
+            self._calendar = GoogleCalendarReader()
         events, tasks, projects, reminders = await asyncio.gather(
-            self._calendar.list_between(start, end),
-            asyncio.to_thread(self._data.personal_tasks),
-            asyncio.to_thread(self._projects.list, str(source.chat_id)),
-            asyncio.to_thread(self._data.upcoming_reminders, source),
+            self._read("calendar", self._calendar.list_between(start, end), operation_id),
+            self._read("tasks", asyncio.to_thread(self._data.personal_tasks), operation_id),
+            self._read(
+                "projects", asyncio.to_thread(self._projects.list, str(source.chat_id)), operation_id
+            ),
+            self._read(
+                "reminders", asyncio.to_thread(self._data.upcoming_reminders, source), operation_id
+            ),
         )
         lines = ["Сегодня"]
         if events:
@@ -70,7 +106,8 @@ class TodayService:
             lines.extend(["", "Пока нет событий, задач, напоминаний или проектов."])
         unavailable = [
             name for name, value in (
-                ("Календарь", events), ("Задачи", tasks), ("Напоминания", reminders)
+                ("Календарь", events), ("Задачи", tasks), ("Проекты", projects),
+                ("Напоминания", reminders)
             ) if value is None
         ]
         if unavailable:

@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Mapping
 
 CommandResult = tuple[int, str, str, bool]
 CommandRunner = Callable[[list[str], float], Awaitable[CommandResult]]
+WINDOWS_LAUNCH_FAILURE_CODES = {3221225477, -1073741819}
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,8 @@ class GoogleCalendarExecutor:
             str(event["end"]),
         ]
         code, stdout, stderr, timed_out = await self._run(create, self._timeout)
+        if code in WINDOWS_LAUNCH_FAILURE_CODES:
+            timed_out = True
         created_id = ""
         if code == 0 and not timed_out:
             try:
@@ -119,6 +122,21 @@ class GoogleCalendarExecutor:
             )
         return CalendarExecutionResult(
             "unknown", detail=(stderr or "Calendar write timed out")[:512]
+        )
+
+    async def reconcile(
+        self, event: Mapping[str, Any], expected_id: str = ""
+    ) -> CalendarExecutionResult:
+        matched = await self._reconcile(event, expected_id)
+        if matched is None:
+            return CalendarExecutionResult(
+                "unknown", external_resource_id=expected_id,
+                detail="the prior Calendar write could not be verified",
+            )
+        return CalendarExecutionResult(
+            "completed",
+            external_resource_id=str(matched.get("id") or expected_id),
+            html_link=str(matched.get("htmlLink") or ""),
         )
 
     async def _reconcile(

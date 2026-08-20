@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from datetime import datetime
 from typing import Any, Mapping
@@ -26,7 +27,12 @@ CALENDAR_SCHEMA = {
         "end_time", "timezone", "missing_fields",
     ],
     "properties": {
-        "intent": {"type": "string", "enum": ["calendar_create", "other"]},
+        "intent": {
+            "type": "string",
+            "enum": [
+                "calendar_create", "other", "uncertain", "unsupported", "multiple_actions",
+            ],
+        },
         "title": {"type": ["string", "null"]},
         "date": {"type": ["object", "null"]},
         "time": {"type": ["object", "null"]},
@@ -39,7 +45,9 @@ CALENDAR_SCHEMA = {
 
 PARSER_INSTRUCTIONS = """Classify only an explicit request to create one Calendar event.
 Return intent=other for availability search, finding a free window, calendar questions,
-editing/deleting events, reminders, or ordinary conversation. Extract the event title and
+editing/deleting events, reminders, or ordinary conversation. Return uncertain when the
+request can be interpreted in materially different ways, unsupported for recurrence or
+explicit attendees/invitations, and multiple_actions for more than one event. Extract the event title and
 temporal expression. Never convert a relative date to an absolute date and never assume the
 current date. Use one of these date shapes:
 {"type":"relative_day","offset":1};
@@ -108,14 +116,19 @@ class CalendarFastPath:
         text = str(getattr(event, "text", "") or "")
         if source is None or text.startswith("/") or not is_exact_calendar_candidate(text):
             return None
-        logger.info("calendar_fast_path milestone=telegram_received")
+        operation_id = secrets.token_hex(4)
+        logger.info(
+            "calendar_fast_path operation_id=%s milestone=telegram_received", operation_id
+        )
         self._ctx.spawn_task(
-            self._prepare(text, source), name="charline:calendar-parse"
+            self._prepare(text, source, operation_id), name="charline:calendar-parse"
         )
         return {"action": "skip", "reason": "charline_calendar_fast_path"}
 
-    async def _prepare(self, text: str, source: Any) -> None:
-        logger.info("calendar_fast_path milestone=parser_started")
+    async def _prepare(self, text: str, source: Any, operation_id: str) -> None:
+        logger.info(
+            "calendar_fast_path operation_id=%s milestone=parser_started", operation_id
+        )
         try:
             result = await self._llm.acomplete_structured(
                 instructions=PARSER_INSTRUCTIONS,
@@ -129,7 +142,9 @@ class CalendarFastPath:
                 task="calendar_parse",
             )
             draft = result.parsed
-            logger.info("calendar_fast_path milestone=parser_finished")
+            logger.info(
+                "calendar_fast_path operation_id=%s milestone=parser_finished", operation_id
+            )
             if not isinstance(draft, Mapping) or draft.get("intent") != "calendar_create":
                 await self._fallback(text, source)
                 return
@@ -171,7 +186,11 @@ class CalendarFastPath:
             )
             logger.warning("calendar confirmation card failed action_id=%s", action_id)
             return
-        logger.info("calendar_fast_path milestone=confirmation_sent action_id=%s", action_id)
+        logger.info(
+            "calendar_fast_path operation_id=%s milestone=confirmation_sent action_id=%s",
+            operation_id,
+            action_id,
+        )
 
     async def _fallback(self, text: str, source: Any) -> None:
         await self._actions.dispatch_agent_turn(
@@ -214,7 +233,11 @@ class CalendarFastPath:
             return {"text": "Это действие уже выполнено.", "buttons": []}
 
         claimed = self._store.claim(
-            action_id, owner_user_id=owner, chat_id=chat_id, thread_id=thread_id
+            action_id,
+            owner_user_id=owner,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            message_id=str(payload.get("message_id") or ""),
         )
         if claimed is None:
             return {"text": "Это действие уже выполнено или больше не актуально.", "buttons": []}
@@ -232,6 +255,7 @@ class CalendarFastPath:
     async def _execute(
         self, action_id: str, item: Mapping[str, Any], *, message_id: str
     ) -> None:
+        self._store.mark_external_started(action_id)
         logger.info("calendar_fast_path milestone=google_started action_id=%s", action_id)
         try:
             result = await self._executor.execute(item["payload"])
@@ -239,6 +263,13 @@ class CalendarFastPath:
             self._store.mark_unknown(action_id, error=str(exc))
             result = None
         logger.info("calendar_fast_path milestone=google_finished action_id=%s", action_id)
+        text = self._finish_text(action_id, item, result)
+        await self._update_result_card(item, message_id, text)
+        logger.info("calendar_fast_path milestone=card_updated action_id=%s", action_id)
+
+    def _finish_text(
+        self, action_id: str, item: Mapping[str, Any], result: Any
+    ) -> str:
         if result is not None and result.status == "completed":
             self._store.complete(
                 action_id, external_resource_id=result.external_resource_id
@@ -255,6 +286,11 @@ class CalendarFastPath:
                 "Не удалось достоверно определить результат. Повторная запись не "
                 "запускалась; проверьте календарь перед новой попыткой."
             )
+        return text
+
+    async def _update_result_card(
+        self, item: Mapping[str, Any], message_id: str, text: str
+    ) -> None:
         if message_id:
             await self._actions.update_card(
                 platform="telegram",
@@ -265,4 +301,26 @@ class CalendarFastPath:
                 text=text,
                 buttons=[],
             )
-        logger.info("calendar_fast_path milestone=card_updated action_id=%s", action_id)
+
+    async def recover(self) -> None:
+        """Reconcile crash-interrupted writes without repeating a mutation."""
+        for item in self._store.recoverable():
+            action_id = str(item["action_id"])
+            if not item.get("external_started_at"):
+                self._store.fail(action_id, error="interrupted before Calendar write")
+                text = "Событие не создавалось: Gateway остановился до обращения к Google."
+            else:
+                try:
+                    result = await self._executor.reconcile(
+                        item["payload"], str(item.get("external_resource_id") or "")
+                    )
+                except Exception as exc:
+                    result = None
+                    self._store.mark_unknown(action_id, error=str(exc))
+                text = self._finish_text(action_id, item, result)
+            await self._update_result_card(item, str(item.get("message_id") or ""), text)
+            logger.info(
+                "calendar_fast_path milestone=recovery_completed action_id=%s status=%s",
+                action_id,
+                (self._store.get(action_id) or {}).get("status", "evicted"),
+            )

@@ -80,6 +80,31 @@ def _tree_manifest(root: Path) -> dict[str, str]:
     return manifest
 
 
+def _tree_digest(root: Path) -> str:
+    digest = sha256()
+    for relative, file_hash in _tree_manifest(root).items():
+        digest.update(relative.encode("utf-8") + b"\0" + file_hash.encode("ascii"))
+    return digest.hexdigest()
+
+
+def _plugin_state_path(hermes_home: Path, plugin_id: str = "charline") -> Path:
+    slug = "".join(
+        char if char.isascii() and (char.isalnum() or char in "_-") else "-"
+        for char in plugin_id.lower()
+    ).strip("-_") or "plugin"
+    suffix = sha256(plugin_id.encode("utf-8")).hexdigest()[:8]
+    return hermes_home / "plugin-data" / f"agent-plugin-{slug}-{suffix}" / "state.json"
+
+
+def _loaded_runtime_version(hermes_home: Path) -> dict[str, object]:
+    try:
+        state = json.loads(_plugin_state_path(hermes_home).read_text(encoding="utf-8"))
+        value = state.get("runtime_version") if isinstance(state, dict) else None
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def _run_check(runner: Runner, command: Sequence[str]) -> tuple[int, str]:
     try:
         return runner(command)
@@ -142,14 +167,45 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
     plugin_source = project_root / "plugins" / "charline"
     if plugin_source.is_dir():
         plugin_target = hermes_home / "plugins" / "charline"
+        source_hash = _tree_digest(plugin_source)
+        target_hash = _tree_digest(plugin_target) if plugin_target.is_dir() else ""
+        loaded = _loaded_runtime_version(hermes_home)
         checks["charline_plugin"] = {
             "ok": plugin_target.is_dir()
             and _tree_manifest(plugin_source) == _tree_manifest(plugin_target),
             "detail": {
                 "source": str(plugin_source),
                 "target": str(plugin_target),
+                "source_hash": source_hash,
+                "target_hash": target_hash,
             },
         }
+        checks["runtime_loaded_plugin"] = {
+            "ok": bool(target_hash) and loaded.get("plugin_hash") == target_hash,
+            "detail": loaded or "Gateway has not recorded the loaded Charline version",
+        }
+
+    repo_code, repo_commit = _run_check(
+        runner, ["git", "-C", str(project_root), "rev-parse", "HEAD"]
+    )
+    hermes_root = hermes_home / "hermes-agent"
+    hermes_code, hermes_commit = _run_check(
+        runner, ["git", "-C", str(hermes_root), "rev-parse", "HEAD"]
+    )
+    patch_root = project_root / "patches" / "hermes-agent"
+    patch_files = [patch_root / "charline.patch", patch_root / "windows-calendar.patch"]
+    checks["runtime_versions"] = {
+        "ok": repo_code == 0 and hermes_code == 0 and all(path.is_file() for path in patch_files),
+        "detail": {
+            "charline_commit": repo_commit.strip(),
+            "hermes_commit": hermes_commit.strip(),
+            "skills_hash": _tree_digest(source_root) if source_root.is_dir() else "",
+            "patch_hashes": {
+                path.name: sha256(path.read_bytes()).hexdigest()
+                for path in patch_files if path.is_file()
+            },
+        },
+    }
     status = "consistent" if all(check["ok"] for check in checks.values()) else "degraded"
     return {
         "status": status,
