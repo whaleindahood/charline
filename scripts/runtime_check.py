@@ -89,10 +89,14 @@ def _configured(output: str, name: str) -> bool:
 
 
 def _google_live_command(hermes_home: Path, setup_path: Path) -> list[str]:
-    venv = hermes_home / "hermes-agent" / "venv"
-    config = venv / "pyvenv.cfg"
-    site_packages = venv / "Lib" / "site-packages"
-    if config.is_file() and site_packages.is_dir():
+    environments = tuple(
+        hermes_home / "hermes-agent" / name for name in (".venv", "venv")
+    )
+    for environment in environments:
+        config = environment / "pyvenv.cfg"
+        site_packages = environment / "Lib" / "site-packages"
+        if not (config.is_file() and site_packages.is_dir()):
+            continue
         try:
             home_line = next(
                 line
@@ -110,11 +114,15 @@ def _google_live_command(hermes_home: Path, setup_path: Path) -> list[str]:
             )
             return [str(base_python), "-c", code]
         except (OSError, StopIteration, ValueError):
-            pass
+            continue
 
-    candidates = (
-        venv / "Scripts" / "python.exe",
-        venv / "bin" / "python",
+    candidates = tuple(
+        candidate
+        for environment in environments
+        for candidate in (
+            environment / "Scripts" / "python.exe",
+            environment / "bin" / "python",
+        )
     )
     for candidate in candidates:
         if candidate.is_file():

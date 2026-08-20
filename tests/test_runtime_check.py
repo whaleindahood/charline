@@ -4,7 +4,12 @@ from subprocess import CompletedProcess
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.runtime_check import collect_runtime, default_hermes_home, default_runner
+from scripts.runtime_check import (
+    _google_live_command,
+    collect_runtime,
+    default_hermes_home,
+    default_runner,
+)
 
 
 class RuntimeCheckTests(unittest.TestCase):
@@ -233,6 +238,25 @@ class RuntimeCheckTests(unittest.TestCase):
             google_command = next(command for command in commands if "--check-live" in " ".join(command))
             self.assertEqual(google_command[0], str(base / "python.exe"))
             self.assertIn("site-packages", " ".join(google_command))
+
+    def test_live_google_prefers_the_gateway_dot_venv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp)
+            setup = hermes_home / "setup.py"
+            setup.write_text("", encoding="utf-8")
+            for name in (".venv", "venv"):
+                environment = hermes_home / "hermes-agent" / name
+                base = hermes_home / f"{name}-python"
+                (environment / "Lib" / "site-packages").mkdir(parents=True)
+                base.mkdir()
+                (base / "python.exe").write_text("", encoding="utf-8")
+                (environment / "pyvenv.cfg").write_text(
+                    f"home = {base}\n", encoding="utf-8"
+                )
+
+            command = _google_live_command(hermes_home, setup)
+
+            self.assertEqual(command[0], str(hermes_home / ".venv-python" / "python.exe"))
 
 
 if __name__ == "__main__":
