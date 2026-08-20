@@ -105,6 +105,29 @@ class EvaluationContractTests(unittest.TestCase):
             ],
         )
 
+    def test_orchestration_scenarios_assert_execution_mechanism(self):
+        by_id = {item["id"]: item for item in self.scenarios}
+        expected = {
+            "orchestration.direct": "direct",
+            "orchestration.delegation": "delegation",
+            "orchestration.background": "background",
+            "orchestration.kanban": "kanban",
+            "orchestration.cron": "cron",
+            "orchestration.project-topic": "project_topic",
+            "orchestration.calendar-fast-path": "calendar_fast_path",
+            "orchestration.calendar-scheduling": "normal_calendar",
+        }
+        for scenario_id, strategy in expected.items():
+            self.assertEqual(by_id[scenario_id]["execution_strategy"], strategy)
+            self.assertEqual(
+                evaluate_trace(by_id[scenario_id], [f"strategy:{strategy}"]), []
+            )
+            self.assertTrue(
+                evaluate_trace(by_id[scenario_id], ["strategy:direct"])
+                if strategy != "direct"
+                else evaluate_trace(by_id[scenario_id], ["strategy:kanban"])
+            )
+
     def test_main_and_native_project_topology_is_covered(self):
         by_id = {item["id"]: item for item in self.scenarios}
         self.assertIn("conversation.main-project-main-isolation", by_id)
@@ -133,6 +156,17 @@ class EvaluationContractTests(unittest.TestCase):
             "no_synthetic_project_message",
             by_id["ui.read-only-project-summary"]["required_trace"],
         )
+
+    def test_memory_boundary_scenarios_are_covered(self):
+        by_id = {item["id"]: item for item in self.scenarios}
+        self.assertIn("global_preference_in_project", by_id[
+            "memory.global-preference-project-access"
+        ]["required_trace"])
+        for scenario_id in (
+            "memory.project-detail-isolation",
+            "memory.temporary-detail-not-persisted",
+        ):
+            self.assertIn("no_global_memory_write", by_id[scenario_id]["required_trace"])
 
     def test_security_policy_defines_external_content_trust_boundary(self):
         policy_paths = [

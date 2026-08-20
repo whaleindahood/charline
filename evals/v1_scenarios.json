@@ -170,7 +170,7 @@
   {
     "id": "ui.conversation-first-daily-menu",
     "request": "Открой основное меню Charline",
-      "expected": ["Show Today Projects personal Tasks Schedules and Settings", "Do not present agent processes as personal tasks", "Keep capabilities conversational", "Keep technical commands manually reachable"],
+      "expected": ["Show Today Projects personal Tasks and Settings", "Do not present agent processes as personal tasks", "Keep capabilities conversational", "Keep technical commands manually reachable"],
     "external_write": "none",
     "required_trace": ["curated_daily_menu", "conversation_first", "technical_commands_preserved"]
   },
@@ -183,7 +183,7 @@
   },
   {
     "id": "ui.restart-safe-read-navigation",
-    "request": "После перезапуска открой старую карточку проектов и расписаний",
+    "request": "После перезапуска открой старую карточку проектов и сводку Сегодня",
     "expected": ["Reconstruct from native state", "Reauthorize owner chat and thread", "Edit the existing card"],
     "external_write": "none",
     "required_trace": ["reconstructed_from_native_state", "owner_chat_thread_authorized", "edit_in_place"]
@@ -194,5 +194,90 @@
     "expected": ["Read native project metadata", "Do not dispatch a synthetic prompt", "Do not mutate project history"],
     "external_write": "none",
     "required_trace": ["native_project_metadata_read", "no_synthetic_project_message", "project_history_unchanged"]
+  },
+  {
+    "id": "orchestration.direct",
+    "request": "Объясни этот термин",
+    "expected": ["Use one normal Hermes turn"],
+    "execution_strategy": "direct",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.delegation",
+    "request": "Сравни четыре библиотеки и дай общую рекомендацию",
+    "expected": ["Use bounded parallel fork/join when it improves the comparison"],
+    "execution_strategy": "delegation",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.background",
+    "request": "Проверь большой лог, а я пока продолжу разговор",
+    "expected": ["Release Main while separate work continues"],
+    "execution_strategy": "background",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.kanban",
+    "request": "Сделай многоэтапное исследование, проверь выводы и подготовь отчёт",
+    "expected": ["Use restart-safe durable multi-stage work"],
+    "execution_strategy": "kanban",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.cron",
+    "request": "Каждое утро присылай мне сводку",
+    "expected": ["Use native Hermes cron"],
+    "execution_strategy": "cron",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.project-topic",
+    "request": "Создай отдельный проект для разработки сайта",
+    "expected": ["Create or reuse a native Telegram project topic"],
+    "execution_strategy": "project_topic",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.calendar-fast-path",
+    "request": "Запиши встречу завтра в 14:00 на час",
+    "expected": ["Use exact-event Calendar Fast Path"],
+    "execution_strategy": "calendar_fast_path",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "orchestration.calendar-scheduling",
+    "request": "Найди окно для встречи завтра",
+    "expected": ["Use normal Hermes Calendar scheduling workflow"],
+    "execution_strategy": "normal_calendar",
+    "external_write": "none",
+    "required_trace": []
+  },
+  {
+    "id": "memory.global-preference-project-access",
+    "request": "Запомни мой часовой пояс и используй его также в проектах",
+    "expected": ["Persist one stable global preference", "Make it available to project sessions"],
+    "external_write": "none",
+    "required_trace": ["stable_preference_saved", "global_preference_in_project"]
+  },
+  {
+    "id": "memory.project-detail-isolation",
+    "request": "В проекте A временный тестовый URL такой-то",
+    "expected": ["Keep the temporary detail in project context", "Do not promote it to global memory"],
+    "external_write": "none",
+    "required_trace": ["project_context_only", "no_global_memory_write"]
+  },
+  {
+    "id": "memory.temporary-detail-not-persisted",
+    "request": "На один раз используй буфер 15 минут",
+    "expected": ["Apply the value to the current task only", "Do not save a durable preference"],
+    "external_write": "none",
+    "required_trace": ["current_task_only", "no_global_memory_write"]
   }
 ]

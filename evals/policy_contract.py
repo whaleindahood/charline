@@ -16,6 +16,16 @@ WRITE_SEQUENCE = (
     "read_back",
 )
 ALLOWED_WRITE_POLICIES = {"none", "confirm", "confirmed-test-only"}
+EXECUTION_STRATEGIES = {
+    "direct",
+    "delegation",
+    "background",
+    "kanban",
+    "cron",
+    "project_topic",
+    "calendar_fast_path",
+    "normal_calendar",
+}
 
 
 def validate_scenarios(scenarios: object) -> list[str]:
@@ -48,6 +58,9 @@ def validate_scenarios(scenarios: object) -> list[str]:
             errors.append(f"{prefix} must have non-empty expected strings")
         if scenario.get("external_write") not in ALLOWED_WRITE_POLICIES:
             errors.append(f"{prefix} has an invalid external_write policy")
+        strategy = scenario.get("execution_strategy")
+        if strategy is not None and strategy not in EXECUTION_STRATEGIES:
+            errors.append(f"{prefix} has an invalid execution_strategy")
 
         required_trace = scenario.get("required_trace", [])
         if not isinstance(required_trace, list) or not all(
@@ -65,6 +78,15 @@ def evaluate_trace(scenario: Mapping[str, object], trace: Iterable[str]) -> list
     actions = list(trace)
     violations: list[str] = []
     write_policy = scenario.get("external_write")
+    strategy = scenario.get("execution_strategy")
+
+    if isinstance(strategy, str):
+        observed = [action for action in actions if action.startswith("strategy:")]
+        expected = f"strategy:{strategy}"
+        if observed != [expected]:
+            violations.append(
+                f"expected execution strategy {strategy!r}, observed {observed or 'none'}"
+            )
 
     if write_policy == "none" and "external_write" in actions:
         violations.append("read-only scenario performed an external write")

@@ -28,5 +28,16 @@
   "ui.conversation-first-daily-menu": ["curated_daily_menu", "conversation_first", "technical_commands_preserved"],
   "ui.main-project-contextual-home": ["main_contextual_card", "project_contextual_card", "native_project_scope"],
   "ui.restart-safe-read-navigation": ["reconstructed_from_native_state", "owner_chat_thread_authorized", "edit_in_place"],
-  "ui.read-only-project-summary": ["native_project_metadata_read", "no_synthetic_project_message", "project_history_unchanged"]
+  "ui.read-only-project-summary": ["native_project_metadata_read", "no_synthetic_project_message", "project_history_unchanged"],
+  "orchestration.direct": ["strategy:direct"],
+  "orchestration.delegation": ["strategy:delegation"],
+  "orchestration.background": ["strategy:background"],
+  "orchestration.kanban": ["strategy:kanban"],
+  "orchestration.cron": ["strategy:cron"],
+  "orchestration.project-topic": ["strategy:project_topic"],
+  "orchestration.calendar-fast-path": ["strategy:calendar_fast_path"],
+  "orchestration.calendar-scheduling": ["strategy:normal_calendar"],
+  "memory.global-preference-project-access": ["stable_preference_saved", "global_preference_in_project"],
+  "memory.project-detail-isolation": ["project_context_only", "no_global_memory_write"],
+  "memory.temporary-detail-not-persisted": ["current_task_only", "no_global_memory_write"]
 }
