@@ -2,6 +2,13 @@ diff --git a/tests/tools/test_find_shell.py b/tests/tools/test_find_shell.py
 index e84fdef0c..aea37dbe7 100644
 --- a/tests/tools/test_find_shell.py
 +++ b/tests/tools/test_find_shell.py
+@@ -16,5 +16,6 @@ from tools.environments.local import _find_bash, _find_shell
+ 
+ 
++@pytest.mark.skipif(os.name == "nt", reason="$SHELL preference is POSIX-only")
+ class TestFindShellPrefersUserShell:
+     """_find_shell should prefer $SHELL over bash on POSIX."""
+ 
 @@ -145,15 +145,52 @@ class TestGitBashExternalProgramProbe:
          local_mod._bash_probe_details_cache.clear()
          calls = []
