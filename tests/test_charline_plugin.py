@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -148,6 +149,24 @@ def test_plugin_registers_only_four_daily_views_and_generic_hooks() -> None:
         "pre_gateway_dispatch", "post_auth_pre_agent_dispatch", "gateway_platform_event",
         "pre_llm_call",
     ]
+
+
+def test_runtime_version_is_recorded_only_by_gateway_process(monkeypatch) -> None:
+    ctx = MagicMock()
+    ctx.platform_actions = MagicMock()
+    ctx.manifest.version = "9.9.9"
+    plugin = CharlinePlugin(ctx)
+
+    monkeypatch.setattr(sys, "argv", ["hermes", "doctor"])
+    plugin.record_runtime_version()
+    ctx.state.set.assert_not_called()
+
+    monkeypatch.setattr(sys, "argv", ["hermes", "gateway", "run"])
+    plugin.record_runtime_version()
+    payload = ctx.state.set.call_args.args[1]
+    assert payload["plugin_version"] == "9.9.9"
+    assert payload["process_id"] > 0
+    assert payload["process_role"] == "gateway"
 
 
 def test_gateway_registration_starts_calendar_recovery_when_loop_is_running() -> None:

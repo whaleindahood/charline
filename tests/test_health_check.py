@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from subprocess import CompletedProcess
@@ -157,6 +158,42 @@ class HealthCheckTests(unittest.TestCase):
             self.assertEqual(
                 result["checks"]["charline_plugin"]["detail"]["target_hash"],
                 _tree_digest(target),
+            )
+
+    def test_loaded_plugin_must_belong_to_current_gateway_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project, hermes = self.make_healthy_fixture(Path(tmp))
+            source = project / "plugins" / "charline"
+            target = hermes / "plugins" / "charline"
+            source.mkdir(parents=True)
+            target.mkdir(parents=True)
+            (source / "plugin.yaml").write_text("name: charline\n", encoding="utf-8")
+            (target / "plugin.yaml").write_text("name: charline\n", encoding="utf-8")
+            (hermes / "gateway.pid").write_text('{"pid":4242}\n', encoding="utf-8")
+            state_path = _plugin_state_path(hermes)
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text(
+                json.dumps({
+                    "runtime_version": {
+                        "plugin_hash": _tree_digest(target),
+                        "plugin_version": "1.3.0",
+                        "process_id": 1111,
+                        "process_role": "gateway",
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            result = collect_health(
+                project_root=project,
+                hermes_home=hermes,
+                runner=lambda command: (0, "test-commit"),
+            )
+
+            self.assertFalse(result["checks"]["runtime_loaded_plugin"]["ok"])
+            self.assertEqual(
+                result["checks"]["runtime_loaded_plugin"]["detail"]["expected_gateway_pid"],
+                4242,
             )
 
     def test_reports_degraded_instead_of_raising_on_unexpected_runner_error(self):

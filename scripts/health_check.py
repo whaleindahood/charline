@@ -105,6 +105,16 @@ def _loaded_runtime_version(hermes_home: Path) -> dict[str, object]:
         return {}
 
 
+def _gateway_pid(hermes_home: Path) -> int | None:
+    try:
+        raw = (hermes_home / "gateway.pid").read_text(encoding="utf-8").strip()
+        value = json.loads(raw)
+        pid = value.get("pid") if isinstance(value, dict) else value
+        return int(pid) if int(pid) > 0 else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def _run_check(runner: Runner, command: Sequence[str]) -> tuple[int, str]:
     try:
         return runner(command)
@@ -170,6 +180,7 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
         source_hash = _tree_digest(plugin_source)
         target_hash = _tree_digest(plugin_target) if plugin_target.is_dir() else ""
         loaded = _loaded_runtime_version(hermes_home)
+        gateway_pid = _gateway_pid(hermes_home)
         checks["charline_plugin"] = {
             "ok": plugin_target.is_dir()
             and _tree_manifest(plugin_source) == _tree_manifest(plugin_target),
@@ -181,8 +192,15 @@ def collect_health(*, project_root: Path, hermes_home: Path, runner: Runner = de
             },
         }
         checks["runtime_loaded_plugin"] = {
-            "ok": bool(target_hash) and loaded.get("plugin_hash") == target_hash,
-            "detail": loaded or "Gateway has not recorded the loaded Charline version",
+            "ok": bool(target_hash)
+            and loaded.get("plugin_hash") == target_hash
+            and loaded.get("process_role") == "gateway"
+            and loaded.get("process_id") == gateway_pid,
+            "detail": (
+                {**loaded, "expected_gateway_pid": gateway_pid}
+                if loaded
+                else "Gateway has not recorded the loaded Charline version"
+            ),
         }
 
     repo_code, repo_commit = _run_check(

@@ -6,6 +6,8 @@ import asyncio
 import contextvars
 import json
 import logging
+import os
+import sys
 import time
 from dataclasses import dataclass
 from hashlib import sha256
@@ -20,9 +22,6 @@ from .today import TodayService
 
 
 logger = logging.getLogger(__name__)
-PLUGIN_VERSION = "1.3.0"
-
-
 def plugin_code_hash(root: Path | None = None) -> str:
     root = Path(root or Path(__file__).parent)
     digest = sha256()
@@ -287,14 +286,18 @@ class CharlinePlugin:
         }
 
     def record_runtime_version(self) -> None:
+        if sys.argv[1:3] != ["gateway", "run"]:
+            return
         state = getattr(self._ctx, "state", None)
         if state is None or not hasattr(state, "set"):
             return
         try:
             state.set("runtime_version", {
-                "plugin_version": PLUGIN_VERSION,
+                "plugin_version": str(self._ctx.manifest.version),
                 "plugin_hash": plugin_code_hash(),
                 "loaded_at": time.time(),
+                "process_id": os.getpid(),
+                "process_role": "gateway",
             })
         except Exception:
             logger.warning("charline runtime version record failed", exc_info=True)
